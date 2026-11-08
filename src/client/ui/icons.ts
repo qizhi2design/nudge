@@ -1,0 +1,68 @@
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  ChevronRight,
+  Copy,
+  FileCode2,
+  GitBranch,
+  GitCommitHorizontal,
+  Globe,
+  History,
+  ListTree,
+  LocateFixed,
+  MessageSquare,
+  MessageSquarePlus,
+  Mic,
+  MousePointer2,
+  PanelRight,
+  Pencil,
+  Plus,
+  Redo2,
+  RefreshCw,
+  RotateCw,
+  Send,
+  Sparkles,
+  Trash2,
+  Undo2,
+  X,
+} from 'lucide-react'
+
+/**
+ * Curated Lucide icon surface for the non-UI Client parts.
+ *
+ * Those parts are concatenated into one factory scope instead of being bundled
+ * as ESM, so they cannot import `lucide-react` themselves. The UI bundle exports
+ * this map once and the build hands it to `src/client/shared/primitives.ts`.
+ */
+export const NudgeIcons = {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  ChevronRight,
+  Copy,
+  FileCode2,
+  GitBranch,
+  GitCommitHorizontal,
+  Globe,
+  History,
+  ListTree,
+  LocateFixed,
+  MessageSquare,
+  MessageSquarePlus,
+  Mic,
+  MousePointer2,
+  PanelRight,
+  Pencil,
+  Plus,
+  Redo2,
+  RefreshCw,
+  RotateCw,
+  Send,
+  Sparkles,
+  Trash2,
+  Undo2,
+  X,
+}

@@ -1,0 +1,8 @@
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .dshnudge-tooltip {
+    @apply dshnudge-z-[2147483000] dshnudge-rounded-md dshnudge-px-2 dshnudge-py-1 dshnudge-text-[11px] dshnudge-shadow-lg;
+  }
+}

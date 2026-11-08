@@ -1,0 +1,1431 @@
+#!/usr/bin/env node
+/**
+ * Engineering smoke test for lib/runtime.js.
+ *
+ * The runtime normally runs inside Chromium. This test loads it into a tiny
+ * hand-written DOM shim so the API contract, the CSSOM edit helpers, selector
+ * generation, event queue and re-injection behaviour can be exercised with
+ * plain `node test/runtime-smoke.mjs`.
+ */
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import vm from 'node:vm'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const RUNTIME_PATH = resolve(HERE, '..', 'lib', 'runtime.js')
+
+/* ------------------------------------------------------------------ result */
+
+let failures = 0
+let checks = 0
+
+function ok(name, condition, detail) {
+  checks += 1
+  if (condition) {
+    process.stdout.write('ok - ' + name + '\n')
+    return
+  }
+  failures += 1
+  process.stderr.write('not ok - ' + name + (detail ? ' :: ' + detail : '') + '\n')
+}
+
+function safeString(value) {
+  if (value === undefined) return 'undefined'
+  if (typeof value === 'function') return '[function]'
+  if (typeof value === 'object' && value !== null) {
+    try {
+      const seen = new WeakSet()
+      return JSON.stringify(value, (key, nested) => {
+        if (typeof nested === 'object' && nested !== null) {
+          if (seen.has(nested)) return '[circular]'
+          seen.add(nested)
+        }
+        return nested
+      })
+    } catch {
+      return Object.prototype.toString.call(value)
+    }
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function eq(name, actual, expected) {
+  ok(name, Object.is(actual, expected), 'expected ' + safeString(expected) + ', got ' + safeString(actual))
+}
+
+function deepEq(name, actual, expected) {
+  ok(name, JSON.stringify(actual) === JSON.stringify(expected), 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual))
+}
+
+function section(name) {
+  process.stdout.write('# ' + name + '\n')
+}
+
+/* ---------------------------------------------------------------- fake DOM */
+
+const COLOR_KEYWORDS = new Set([
+  'transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'revert', 'red', 'blue', 'green',
+  'white', 'black', 'gray', 'grey', 'yellow', 'orange', 'purple', 'pink', 'brown', 'silver',
+  'navy', 'teal', 'lime', 'aqua', 'maroon', 'olive', 'fuchsia', 'none',
+])
+const DISPLAY_KEYWORDS = new Set([
+  'block', 'inline', 'inline-block', 'flex', 'inline-flex', 'grid', 'inline-grid', 'contents', 'none', 'table', 'list-item',
+])
+const GENERIC_KEYWORDS = new Set([
+  'auto', 'normal', 'none', 'inherit', 'initial', 'unset', 'revert', 'fit-content', 'max-content', 'min-content',
+  'transparent', 'currentcolor',
+])
+
+function isValidPropertyName(name) {
+  return /^--[a-zA-Z0-9_-]+$/.test(name) || /^[a-z][a-z-]*$/.test(name)
+}
+
+function isValidPropertyValue(name, value) {
+  if (value === '') return true
+  if (/[;{}]|<\/?script/i.test(value)) return false
+  if (name === 'color' || name === 'background-color' || name === 'border-color') {
+    if (/^#[0-9a-f]{3,8}$/i.test(value)) return true
+    if (/^(?:rgba?|hsla?)\([^)]*\)$/i.test(value)) return true
+    return COLOR_KEYWORDS.has(value.toLowerCase())
+  }
+  if (name === 'display') return DISPLAY_KEYWORDS.has(value.toLowerCase())
+  if (name === 'opacity') return /^-?\d*\.?\d+$/.test(value) || GENERIC_KEYWORDS.has(value.toLowerCase())
+  if (name === 'fill' || name === 'stroke') return true
+  if (/^(?:width|height|min-width|min-height|max-width|max-height|font-size|line-height|top|right|bottom|left|gap|border-radius|letter-spacing|margin|padding|margin-top|margin-right|margin-bottom|margin-left|padding-top|padding-right|padding-bottom|padding-left|border|border-width|z-index|transform|box-shadow|background-image|flex-direction|justify-content|align-items|overflow|visibility)$/.test(name)) {
+    if (GENERIC_KEYWORDS.has(value.toLowerCase())) return true
+    return /^[-+]?(?:\d*\.)?\d+(?:px|%|em|rem|vh|vw|pt|s|ms)?$/i.test(value) || /^(?:solid|dashed|dotted|none|row|column|flex-start|flex-end|center|space-between|space-around|space-evenly|stretch|normal|visible|hidden|clip|scroll|auto|absolute|relative|fixed|sticky|static)$/i.test(value) || /[a-z(]/.test(value)
+  }
+  return true
+}
+
+class FakeStyle {
+  constructor() {
+    this._store = new Map()
+    this._priorities = new Map()
+  }
+  get length() {
+    return this._store.size
+  }
+  item(index) {
+    return Array.from(this._store.keys())[index] || ''
+  }
+  setProperty(name, value, priority) {
+    const key = String(name).toLowerCase()
+    const text = String(value)
+    if (!isValidPropertyName(key)) return
+    if (!isValidPropertyValue(key, text)) return
+    this._store.set(key, text)
+    this._priorities.set(key, priority || '')
+  }
+  removeProperty(name) {
+    const key = String(name).toLowerCase()
+    const had = this._store.has(key)
+    this._store.delete(key)
+    this._priorities.delete(key)
+    return had ? this._store.get(key) || '' : ''
+  }
+  getPropertyValue(name) {
+    return this._store.get(String(name).toLowerCase()) || ''
+  }
+  getPropertyPriority(name) {
+    return this._priorities.get(String(name).toLowerCase()) || ''
+  }
+  get cssText() {
+    return Array.from(this._store.entries())
+      .map(([property, value]) => property + ': ' + value + ';')
+      .join(' ')
+  }
+}
+
+class FakeTextNode {
+  constructor(value) {
+    this.nodeType = 3
+    this.nodeValue = String(value)
+    this.parentNode = null
+  }
+  get textContent() {
+    return this.nodeValue
+  }
+  set textContent(value) {
+    this.nodeValue = String(value)
+  }
+  get isConnected() {
+    let node = this.parentNode
+    while (node) {
+      if (node.nodeType === 9) return true
+      if (node === node.ownerDocument?.documentElement) return true
+      node = node.parentNode
+    }
+    return false
+  }
+}
+
+class FakeEvent {
+  constructor(type, init) {
+    const options = init || {}
+    this.type = type
+    this.target = options.target || null
+    this.button = options.button === undefined ? 0 : options.button
+    this.clientX = options.clientX || 0
+    this.clientY = options.clientY || 0
+    this.key = options.key || ''
+    this.code = options.code || ''
+    this.metaKey = options.metaKey === true
+    this.ctrlKey = options.ctrlKey === true
+    this.shiftKey = options.shiftKey === true
+    this.altKey = options.altKey === true
+    this.repeat = options.repeat === true
+    this.isComposing = options.isComposing === true
+    this.relatedTarget = options.relatedTarget || null
+    this.defaultPrevented = false
+    this._stopped = false
+    this._path = null
+  }
+  preventDefault() {
+    this.defaultPrevented = true
+  }
+  stopPropagation() {
+    this._stopped = true
+  }
+  stopImmediatePropagation() {
+    this._stopped = true
+  }
+  composedPath() {
+    return this._path || buildPath(this.target)
+  }
+}
+
+function eventTargetMixin(target) {
+  const listeners = new Map()
+  target.__listeners = listeners
+  target.addEventListener = (type, handler, capture) => {
+    const key = String(type) + (capture === true ? '#c' : '#b')
+    if (!listeners.has(key)) listeners.set(key, [])
+    listeners.get(key).push(handler)
+  }
+  target.removeEventListener = (type, handler, capture) => {
+    const key = String(type) + (capture === true ? '#c' : '#b')
+    const list = listeners.get(key)
+    if (!list) return
+    const index = list.indexOf(handler)
+    if (index !== -1) list.splice(index, 1)
+  }
+  return target
+}
+
+function listenerCount(target) {
+  let total = 0
+  for (const list of target.__listeners.values()) total += list.length
+  return total
+}
+
+function buildPath(target) {
+  const path = []
+  let node = target
+  let guard = 0
+  while (node && guard < 200) {
+    path.push(node)
+    if (node.nodeType === 9) break
+    node = node.parentNode || null
+    guard += 1
+  }
+  // path currently target..document (or root)
+  if (path[path.length - 1] && path[path.length - 1].nodeType === 9) {
+    path.push(path[path.length - 1].defaultView || null)
+  }
+  return path.filter(Boolean)
+}
+
+function dispatch(target, event) {
+  event.target = event.target || target
+  event._path = buildPath(event.target)
+  const path = event._path
+  // capture: window -> target
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    if (event._stopped) break
+    invoke(path[index], event, true)
+  }
+  // bubble: target -> window
+  for (let index = 0; index < path.length; index += 1) {
+    if (event._stopped) break
+    invoke(path[index], event, false)
+  }
+  return !event.defaultPrevented
+}
+
+function invoke(node, event, capture) {
+  if (!node || !node.__listeners) return
+  const key = event.type + (capture ? '#c' : '#b')
+  const list = node.__listeners.get(key)
+  if (!list || list.length === 0) return
+  const previous = event.currentTarget
+  event.currentTarget = node
+  for (const handler of list.slice()) {
+    try {
+      handler(event)
+    } catch (error) {
+      failures += 1
+      process.stderr.write('not ok - listener threw during ' + event.type + ': ' + (error && error.stack ? error.stack : error) + '\n')
+    }
+    if (event._stopped) break
+  }
+  event.currentTarget = previous
+}
+
+function splitTopLevel(text, separator) {
+  const parts = []
+  let depth = 0
+  let quote = ''
+  let buffer = ''
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (quote) {
+      buffer += character
+      if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      buffer += character
+      continue
+    }
+    if (character === '[' || character === '(') depth += 1
+    if (character === ']' || character === ')') depth -= 1
+    if (depth === 0 && character === separator) {
+      parts.push(buffer)
+      buffer = ''
+      continue
+    }
+    buffer += character
+  }
+  parts.push(buffer)
+  return parts
+}
+
+function matchesCompound(element, compound) {
+  if (!element || element.nodeType !== 1) return false
+  let rest = compound.trim()
+  if (rest === '') return false
+  const tagMatch = /^([a-zA-Z][\w-]*|\*)/.exec(rest)
+  if (tagMatch) {
+    if (tagMatch[1] !== '*' && element.localName !== tagMatch[1].toLowerCase()) return false
+    rest = rest.slice(tagMatch[0].length)
+  }
+  while (rest.length > 0) {
+    if (rest[0] === '.') {
+      const match = /^\.([\w-]+)/.exec(rest)
+      if (!match) return false
+      if (!element.classList.contains(match[1])) return false
+      rest = rest.slice(match[0].length)
+      continue
+    }
+    if (rest[0] === '#') {
+      const match = /^#([\w-]+)/.exec(rest)
+      if (!match) return false
+      if (element.id !== match[1]) return false
+      rest = rest.slice(match[0].length)
+      continue
+    }
+    if (rest[0] === '[') {
+      const match = /^\[\s*([\w:.-]+)(?:\s*([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+)))?\s*\]/.exec(rest)
+      if (!match) return false
+      const name = match[1]
+      const operator = match[2]
+      const expected = match[3] !== undefined ? match[3] : match[4] !== undefined ? match[4] : match[5]
+      const actual = element.getAttribute(name)
+      if (actual === null) return false
+      if (operator === '=' && actual !== expected) return false
+      if (operator === '*=' && actual.indexOf(expected) === -1) return false
+      if (operator === '^=' && !actual.startsWith(expected)) return false
+      if (operator === '$=' && !actual.endsWith(expected)) return false
+      if (operator === '~=' && actual.split(/\s+/).indexOf(expected) === -1) return false
+      rest = rest.slice(match[0].length)
+      continue
+    }
+    if (rest[0] === ':') {
+      const nthOfType = /^:nth-of-type\((\d+)\)/.exec(rest)
+      if (nthOfType) {
+        const parent = element.parentNode
+        if (!parent) return false
+        const peers = Array.from(parent.children).filter((sibling) => sibling.localName === element.localName)
+        if (peers.indexOf(element) !== Number(nthOfType[1]) - 1) return false
+        rest = rest.slice(nthOfType[0].length)
+        continue
+      }
+      const nthChild = /^:nth-child\((\d+)\)/.exec(rest)
+      if (nthChild) {
+        const parent = element.parentNode
+        if (!parent) return false
+        const peers = Array.from(parent.children)
+        if (peers.indexOf(element) !== Number(nthChild[1]) - 1) return false
+        rest = rest.slice(nthChild[0].length)
+        continue
+      }
+      if (rest.startsWith(':first-child')) {
+        const parent = element.parentNode
+        if (!parent || parent.children[0] !== element) return false
+        rest = rest.slice(':first-child'.length)
+        continue
+      }
+      if (rest.startsWith(':last-child')) {
+        const parent = element.parentNode
+        if (!parent || parent.children[parent.children.length - 1] !== element) return false
+        rest = rest.slice(':last-child'.length)
+        continue
+      }
+      return false
+    }
+    return false
+  }
+  return true
+}
+
+function matchesDescendantSequence(element, segment) {
+  // Split on whitespace outside brackets/quotes so `[aria-label="Move toolbar"]`
+  // stays one compound instead of becoming a descendant chain.
+  const tokens = splitTopLevel(segment.trim(), ' ').map((token) => token.trim()).filter(Boolean)
+  if (tokens.length === 0) return false
+  if (!matchesCompound(element, tokens[tokens.length - 1])) return false
+  let current = element.parentElement
+  for (let index = tokens.length - 2; index >= 0; index -= 1) {
+    let matched = false
+    while (current) {
+      if (matchesCompound(current, tokens[index])) {
+        matched = true
+        current = current.parentElement
+        break
+      }
+      current = current.parentElement
+    }
+    if (!matched) return false
+  }
+  return true
+}
+
+function matchesSelector(element, selector) {
+  const alternatives = splitTopLevel(selector, ',')
+  for (const alternative of alternatives) {
+    const text = alternative.trim()
+    if (text === '') continue
+    const segments = text.split('>').map((segment) => segment.trim()).filter(Boolean)
+    if (segments.length === 0) continue
+    if (!matchesDescendantSequence(element, segments[segments.length - 1])) continue
+    let current = element
+    let matched = true
+    for (let index = segments.length - 2; index >= 0; index -= 1) {
+      const tokens = segments[index].split(/\s+/).filter(Boolean)
+      const direct = tokens[tokens.length - 1]
+      const parent = current.parentElement
+      if (!parent || !matchesCompound(parent, direct)) {
+        matched = false
+        break
+      }
+      let ancestor = parent.parentElement
+      for (let tokenIndex = tokens.length - 2; tokenIndex >= 0; tokenIndex -= 1) {
+        let found = false
+        while (ancestor) {
+          if (matchesCompound(ancestor, tokens[tokenIndex])) {
+            found = true
+            ancestor = ancestor.parentElement
+            break
+          }
+          ancestor = ancestor.parentElement
+        }
+        if (!found) {
+          matched = false
+          break
+        }
+      }
+      if (!matched) break
+      current = parent
+    }
+    if (matched) return true
+  }
+  return false
+}
+
+function collectElements(root) {
+  const out = []
+  function walk(node) {
+    for (const child of node.children) {
+      out.push(child)
+      walk(child)
+    }
+  }
+  walk(root)
+  return out
+}
+
+function classListFor(element) {
+  const api = {
+    contains(name) {
+      return (element.getAttribute('class') || '').split(/\s+/).filter(Boolean).indexOf(name) !== -1
+    },
+    add(name) {
+      const current = api.values()
+      if (current.indexOf(name) === -1) current.push(name)
+      element.setAttribute('class', current.join(' '))
+    },
+    remove(name) {
+      const current = api.values().filter((value) => value !== name)
+      element.setAttribute('class', current.join(' '))
+    },
+    toggle(name, force) {
+      const has = api.contains(name)
+      const next = force === undefined ? !has : force === true
+      if (next) api.add(name)
+      else api.remove(name)
+      return next
+    },
+    values() {
+      return (element.getAttribute('class') || '').split(/\s+/).filter(Boolean)
+    },
+  }
+  return api
+}
+
+class FakeElement {
+  constructor(tag, document) {
+    this.nodeType = 1
+    this.tagName = String(tag).toUpperCase()
+    this.localName = String(tag).toLowerCase()
+    this.ownerDocument = document
+    this.parentNode = null
+    this.childNodes = []
+    this.attributes = []
+    this.style = new FakeStyle()
+    this.value = ''
+    this.__rect = { x: 0, y: 0, width: 100, height: 40 }
+    eventTargetMixin(this)
+    this.classList = classListFor(this)
+  }
+  get children() {
+    return this.childNodes.filter((node) => node.nodeType === 1)
+  }
+  get parentElement() {
+    return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null
+  }
+  get id() {
+    return this.getAttribute('id') || ''
+  }
+  set id(value) {
+    this.setAttribute('id', value)
+  }
+  get className() {
+    return this.getAttribute('class') || ''
+  }
+  set className(value) {
+    this.setAttribute('class', value)
+  }
+  get isConnected() {
+    let node = this
+    while (node) {
+      if (node === this.ownerDocument.documentElement) return true
+      node = node.parentNode
+    }
+    return false
+  }
+  appendChild(node) {
+    if (!node) return node
+    if (node.parentNode) node.parentNode.removeChild(node)
+    node.parentNode = this
+    this.childNodes.push(node)
+    return node
+  }
+  removeChild(node) {
+    const index = this.childNodes.indexOf(node)
+    if (index !== -1) this.childNodes.splice(index, 1)
+    node.parentNode = null
+    return node
+  }
+  remove() {
+    if (this.parentNode) this.parentNode.removeChild(this)
+  }
+  getAttribute(name) {
+    const key = String(name).toLowerCase()
+    for (const attribute of this.attributes) {
+      if (attribute.name === key) return attribute.value
+    }
+    return null
+  }
+  setAttribute(name, value) {
+    const key = String(name).toLowerCase()
+    const text = String(value)
+    for (const attribute of this.attributes) {
+      if (attribute.name === key) {
+        attribute.value = text
+        return
+      }
+    }
+    this.attributes.push({ name: key, value: text })
+  }
+  removeAttribute(name) {
+    const key = String(name).toLowerCase()
+    this.attributes = this.attributes.filter((attribute) => attribute.name !== key)
+  }
+  hasAttribute(name) {
+    return this.getAttribute(name) !== null
+  }
+  get textContent() {
+    return this.childNodes.map((node) => node.textContent || '').join('')
+  }
+  set textContent(value) {
+    this.childNodes = []
+    const text = String(value)
+    if (text !== '') this.appendChild(new FakeTextNode(text))
+  }
+  get innerHTML() {
+    return this.textContent
+  }
+  set innerHTML(value) {
+    this.textContent = value
+  }
+  get innerText() {
+    return this.textContent
+  }
+  set innerText(value) {
+    this.textContent = value
+  }
+  get outerHTML() {
+    const attributes = this.attributes
+      .map((attribute) => ' ' + attribute.name + '="' + attribute.value + '"')
+      .join('')
+    return '<' + this.localName + attributes + '>' + this.textContent + '</' + this.localName + '>'
+  }
+  getBoundingClientRect() {
+    const rect = this.__rect
+    return {
+      x: rect.x,
+      y: rect.y,
+      left: rect.x,
+      top: rect.y,
+      width: rect.width,
+      height: rect.height,
+      right: rect.x + rect.width,
+      bottom: rect.y + rect.height,
+    }
+  }
+  scrollIntoView() {}
+  focus() {}
+  setSelectionRange() {}
+  getRootNode() {
+    let node = this
+    while (node.parentNode) node = node.parentNode
+    return node
+  }
+  contains(node) {
+    let current = node
+    while (current) {
+      if (current === this) return true
+      current = current.parentNode
+    }
+    return false
+  }
+  closest(selector) {
+    let node = this
+    while (node) {
+      if (node.nodeType === 1 && matchesSelector(node, selector)) return node
+      node = node.parentNode
+    }
+    return null
+  }
+  matches(selector) {
+    return matchesSelector(this, selector)
+  }
+  querySelectorAll(selector) {
+    return collectElements(this).filter((element) => matchesSelector(element, selector))
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    eventTargetMixin(this)
+    this.nodeType = 9
+    this.title = 'Demo page'
+    this.readyState = 'complete'
+    this.styleSheets = []
+    this.documentElement = new FakeElement('html', this)
+    this.documentElement.parentNode = this
+    const head = new FakeElement('head', this)
+    const body = new FakeElement('body', this)
+    this.documentElement.appendChild(head)
+    this.documentElement.appendChild(body)
+    this.head = head
+    this.body = body
+    this.defaultView = null
+    this.__all = [this.documentElement, head, body]
+  }
+  createElement(tag) {
+    const element = new FakeElement(tag, this)
+    this.__all.push(element)
+    return element
+  }
+  createTextNode(value) {
+    return new FakeTextNode(value)
+  }
+  getElementById(id) {
+    return collectElements(this.documentElement).find((element) => element.id === id) || null
+  }
+  contains(node) {
+    return this.documentElement.contains(node)
+  }
+  querySelectorAll(selector) {
+    const all = [this.documentElement].concat(collectElements(this.documentElement))
+    return all.filter((element) => matchesSelector(element, selector))
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null
+  }
+  elementFromPoint(x, y) {
+    const candidates = collectElements(this.documentElement).filter((element) => {
+      const rect = element.getBoundingClientRect()
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    })
+    return candidates[candidates.length - 1] || null
+  }
+  dispatchEvent(event) {
+    return dispatch(this, event)
+  }
+}
+
+const defaultsByTag = {
+  div: 'block', section: 'block', header: 'block', footer: 'block', main: 'block',
+  p: 'block', h1: 'block', h2: 'block', h3: 'block', ul: 'block', li: 'list-item',
+  span: 'inline', a: 'inline', strong: 'inline', em: 'inline',
+  input: 'inline-block', textarea: 'inline-block', button: 'inline-block',
+}
+
+function defaultComputedValue(element, property) {
+  const rect = element.__rect || { width: 0, height: 0 }
+  switch (property) {
+    case 'display':
+      return defaultsByTag[element.localName] || 'inline'
+    case 'position':
+      return 'static'
+    case 'width':
+    case 'height':
+      return (property === 'width' ? rect.width : rect.height) + 'px'
+    case 'color':
+      return 'rgb(0, 0, 0)'
+    case 'background-color':
+    case 'background':
+      return 'rgba(0, 0, 0, 0)'
+    case 'font-size':
+      return '16px'
+    case 'font-family':
+      return 'sans-serif'
+    case 'font-weight':
+      return '400'
+    case 'line-height':
+      return 'normal'
+    case 'border-radius':
+      return '0px'
+    case 'border':
+      return '0px none rgb(0, 0, 0)'
+    case 'opacity':
+      return '1'
+    case 'z-index':
+      return 'auto'
+    case 'overflow':
+      return 'visible'
+    case 'margin':
+    case 'padding':
+    case 'margin-top':
+    case 'margin-right':
+    case 'margin-bottom':
+    case 'margin-left':
+    case 'padding-top':
+    case 'padding-right':
+    case 'padding-bottom':
+    case 'padding-left':
+    case 'gap':
+    case 'letter-spacing':
+      return property === 'letter-spacing' || property === 'gap' ? 'normal' : '0px'
+    case 'top':
+    case 'right':
+    case 'bottom':
+    case 'left':
+      return 'auto'
+    case 'min-width':
+    case 'min-height':
+      return 'auto'
+    case 'max-width':
+    case 'max-height':
+      return 'none'
+    case 'flex-direction':
+      return 'row'
+    case 'justify-content':
+    case 'align-items':
+      return 'normal'
+    case 'box-shadow':
+    case 'transform':
+    case 'background-image':
+      return 'none'
+    case 'visibility':
+      return 'visible'
+    case 'text-align':
+      return 'start'
+    default:
+      return ''
+  }
+}
+
+function getComputedStyle(element) {
+  return {
+    getPropertyValue(property) {
+      const name = String(property).toLowerCase()
+      const inline = element.style.getPropertyValue(name)
+      if (inline !== '') return inline
+      return defaultComputedValue(element, name)
+    },
+  }
+}
+
+/* ---------------------------------------------------------------- sandbox */
+
+const document = new FakeDocument()
+const rafQueue = []
+let rafSeq = 0
+
+function requestAnimationFrame(callback) {
+  rafSeq += 1
+  rafQueue.push({ id: rafSeq, callback })
+  return rafSeq
+}
+
+function cancelAnimationFrame(id) {
+  const index = rafQueue.findIndex((entry) => entry.id === id)
+  if (index !== -1) rafQueue.splice(index, 1)
+}
+
+function flushFrames(rounds = 6) {
+  let remaining = rounds
+  while (rafQueue.length > 0 && remaining > 0) {
+    remaining -= 1
+    const batch = rafQueue.splice(0, rafQueue.length)
+    for (const entry of batch) entry.callback(Date.now())
+  }
+}
+
+class FakeMutationObserver {
+  constructor(callback) {
+    this.callback = callback
+  }
+  observe() {}
+  disconnect() {}
+}
+
+const history = {
+  state: null,
+  pushState(state, title, url) {
+    this.state = state
+    if (url) location.href = new URL(url, location.href).href
+  },
+  replaceState(state, title, url) {
+    this.state = state
+    if (url) location.href = new URL(url, location.href).href
+  },
+}
+
+const location = { href: 'http://127.0.0.1:4173/index.html', origin: 'http://127.0.0.1:4173' }
+
+const sandbox = {
+  document,
+  location,
+  history,
+  innerWidth: 1280,
+  innerHeight: 800,
+  devicePixelRatio: 1,
+  CSS: { escape: (value) => String(value) },
+  getComputedStyle,
+  requestAnimationFrame,
+  cancelAnimationFrame,
+  setTimeout,
+  clearTimeout,
+  MutationObserver: FakeMutationObserver,
+  console,
+  URL,
+  Date,
+  Math,
+  JSON,
+  Object,
+  Array,
+  String,
+  Number,
+  Boolean,
+  RegExp,
+  Map,
+  Set,
+  Promise,
+  Error,
+  isFinite,
+  parseInt,
+}
+sandbox.window = sandbox
+sandbox.self = sandbox
+sandbox.globalThis = sandbox
+eventTargetMixin(sandbox)
+document.defaultView = sandbox
+
+vm.createContext(sandbox)
+
+/* --------------------------------------------------------------- utilities */
+
+function element(tag, options) {
+  const created = document.createElement(tag)
+  const settings = options || {}
+  if (settings.id) created.setAttribute('id', settings.id)
+  if (settings.className) created.setAttribute('class', settings.className)
+  if (settings.text !== undefined) created.textContent = settings.text
+  if (settings.rect) created.__rect = settings.rect
+  if (settings.attrs) {
+    for (const [name, value] of Object.entries(settings.attrs)) created.setAttribute(name, value)
+  }
+  const parent = settings.parent || document.body
+  if (parent) parent.appendChild(created)
+  return created
+}
+
+function flushEvents(runtime) {
+  return runtime.drainEvents()
+}
+
+/* ------------------------------------------------------------------- tests */
+
+async function run() {
+  const source = await readFile(RUNTIME_PATH, 'utf8')
+
+  section('load')
+  const status = vm.runInContext(source, sandbox, { filename: 'runtime.js' })
+  eq("executeJavaScript result is 'ok'", status, 'ok')
+  const runtime = sandbox.__DSH_NUDGE__
+  ok('namespace exposed', !!runtime)
+
+  section('api surface')
+  eq('version is 1', runtime.version, 1)
+  const methods = [
+    'setMode', 'setSelection', 'clearSelection', 'setSelectionByPath', 'getDescriptor',
+    'getAncestry', 'drainEvents', 'getState', 'applyStyle', 'applyText', 'applyAttr',
+    'reapply', 'setLocale', 'setTheme', 'locate', 'openAnnotationEditor',
+    'updateAnnotation', 'removeAnnotation', 'reinit', 'destroy',
+  ]
+  for (const method of methods) {
+    ok('api.' + method + ' is a function', typeof runtime[method] === 'function')
+  }
+
+  section('page info and state')
+  const info = flushEvents(runtime)
+  ok('initial page-info queued', info.some((event) => event.type === 'page-info'))
+  const pageInfo = info.find((event) => event.type === 'page-info')
+  eq('page-info url', pageInfo.url, 'http://127.0.0.1:4173/index.html')
+  eq('page-info title', pageInfo.title, 'Demo page')
+  eq('drain clears queue', flushEvents(runtime).length, 0)
+  const state0 = runtime.getState()
+  eq('default mode browse', state0.mode, 'browse')
+  eq('state version', state0.version, 1)
+  eq('no selection initially', state0.selection, null)
+  eq('no annotations initially', state0.annotations.length, 0)
+
+  section('mode switching')
+  eq('setMode annotate', runtime.setMode('annotate'), true)
+  eq('mode is annotate', runtime.getState().mode, 'annotate')
+  eq('setMode edit', runtime.setMode('edit'), true)
+  eq('mode is edit', runtime.getState().mode, 'edit')
+  eq('setMode rejects unknown mode', runtime.setMode('destroy'), false)
+  eq('setMode browse', runtime.setMode('browse'), true)
+
+  section('fixtures')
+  const hero = element('section', {
+    id: 'hero',
+    className: 'hero card',
+    rect: { x: 20, y: 40, width: 600, height: 240 },
+  })
+  hero.setAttribute('data-source', 'demo/index.html:30')
+  const title = element('h2', { id: 'title', text: '智选汽车', rect: { x: 24, y: 48, width: 240, height: 32 }, parent: hero })
+  const sub = element('p', { className: 'sub', text: '一张会说话的卡片', rect: { x: 24, y: 88, width: 300, height: 24 }, parent: hero })
+  const repeated = []
+  for (let index = 0; index < 3; index += 1) {
+    repeated.push(
+      element('div', {
+        className: 'item',
+        rect: { x: 20, y: 300 + index * 50, width: 200, height: 40 },
+        parent: document.body,
+      }),
+    )
+  }
+  const textHost = element('div', { id: 'text-host', parent: document.body, rect: { x: 20, y: 500, width: 300, height: 40 } })
+  textHost.appendChild(document.createTextNode('Hello '))
+  const strongChild = element('strong', { text: 'child', parent: textHost })
+  textHost.appendChild(document.createTextNode(' world'))
+  const noTextHost = element('div', { id: 'no-text', parent: document.body })
+  element('span', { text: 'only child', parent: noTextHost })
+  const link = element('a', { id: 'link', attrs: { href: 'https://example.com/a' }, parent: document.body })
+  const button = element('button', { id: 'button', text: '按钮', parent: document.body, rect: { x: 400, y: 500, width: 120, height: 36 } })
+  const destroyable = element('div', { id: 'destroyable', parent: document.body, rect: { x: 600, y: 500, width: 80, height: 30 } })
+  const script = element('script', { id: 'script', parent: document.head })
+  const stylesheet = element('link', { id: 'stylesheet', parent: document.head })
+  const image = element('img', { id: 'image', parent: document.body })
+  const styled = element('div', { id: 'styled', parent: document.body, rect: { x: 20, y: 600, width: 100, height: 20 } })
+  styled.style.setProperty('color', 'blue')
+
+  section('descriptors')
+  ok('setSelection #hero returns a descriptor', !!runtime.setSelection('#hero') && runtime.getState().selection.id === 'hero')
+  const heroState = runtime.getState()
+  ok('selection present', !!heroState.selection)
+  eq('selected tag', heroState.selection.tag, 'section')
+  eq('selected id', heroState.selection.id, 'hero')
+  deepEq('selected classes', heroState.selection.classes.slice(0, 2), ['hero', 'card'])
+  deepEq('rect x/y/width/height', heroState.selection.rect, { x: 20, y: 40, width: 600, height: 240 })
+  eq('descriptor selector resolves uniquely', document.querySelector(heroState.selection.selector), hero)
+  ok('descriptor has styles', !!heroState.selection.styles)
+  eq('styles display', heroState.selection.styles.display, 'block')
+  for (const key of ['top', 'right', 'bottom', 'left', 'marginTop', 'paddingLeft', 'gap', 'minWidth', 'maxWidth', 'flexDirection', 'justifyContent', 'alignItems', 'letterSpacing', 'boxShadow', 'transform', 'visibility', 'backgroundImage']) {
+    ok('styles includes ' + key, Object.prototype.hasOwnProperty.call(heroState.selection.styles, key))
+  }
+  ok('sourceHints file', !!heroState.selection.sourceHints && heroState.selection.sourceHints.file === 'demo/index.html')
+  eq('sourceHints line', heroState.selection.sourceHints.line, 30)
+  ok('ancestry bounded', heroState.selection.ancestry.length <= 6)
+  eq('directText', runtime.getDescriptor('#title').directText, '智选汽车')
+  eq('inlineStyles camelCase', runtime.getDescriptor('#styled').inlineStyles.color, 'blue')
+  eq('getDescriptor missing returns null', runtime.getDescriptor('.does-not-exist'), null)
+  eq('setSelection missing selector returns null', runtime.setSelection('.does-not-exist'), null)
+  eq('setSelection null does not throw', runtime.setSelection(null), null)
+
+  section('paths and ancestry')
+  const heroDescriptor = runtime.getDescriptor('#hero')
+  ok('path is an array', Array.isArray(heroDescriptor.path))
+  ok('setSelectionByPath round-trips', !!runtime.setSelectionByPath(heroDescriptor.path))
+  eq('setSelectionByPath selected same element', runtime.getState().selection.id, 'hero')
+  const ancestry = runtime.getAncestry('#title', 3, 2)
+  ok('getAncestry returns a tree', !!ancestry && typeof ancestry.tag === 'string')
+  ok('getAncestry root is an ancestor', ancestry.tag === 'html' || ancestry.tag === 'body' || ancestry.tag === 'section')
+  function findTreeSelector(node, selector) {
+    if (!node) return null
+    if (node.selector === selector) return node
+    for (const child of node.children || []) {
+      const found = findTreeSelector(child, selector)
+      if (found) return found
+    }
+    return null
+  }
+  const targetNode = findTreeSelector(ancestry, runtime.getDescriptor('#title').selector)
+  ok('getAncestry targets the element selector', !!targetNode, JSON.stringify(ancestry))
+  ok('getAncestry target has children', !!targetNode && Array.isArray(targetNode.children))
+  const defaultAncestry = runtime.getAncestry('#title')
+  ok('getAncestry defaults up/down (up=3)', !!defaultAncestry && defaultAncestry.tag === 'html', JSON.stringify(defaultAncestry && defaultAncestry.tag))
+
+  section('selector uniqueness')
+  for (let index = 0; index < repeated.length; index += 1) {
+    runtime.setSelectionByPath((function findPath(node) {
+      const path = []
+      let current = node
+      while (current && current !== document.documentElement) {
+        const parent = current.parentElement
+        path.unshift(Array.from(parent.children).indexOf(current))
+        current = parent
+      }
+      return path
+    })(repeated[index]))
+    const descriptor = runtime.getState().selection
+    ok('repeated item ' + index + ' selector unique', !!descriptor && document.querySelector(descriptor.selector) === repeated[index], descriptor && descriptor.selector)
+  }
+  const selectors = new Set()
+  for (const item of repeated) {
+    runtime.setSelectionByPath((function findPath(node) {
+      const path = []
+      let current = node
+      while (current && current !== document.documentElement) {
+        const parent = current.parentElement
+        path.unshift(Array.from(parent.children).indexOf(current))
+        current = parent
+      }
+      return path
+    })(item))
+    selectors.add(runtime.getState().selection.selector)
+  }
+  eq('repeated items produce distinct selectors', selectors.size, 3)
+
+  section('applyStyle')
+  const styleResult = runtime.applyStyle('#hero', 'backgroundColor', '#ff0000')
+  eq('applyStyle ok', styleResult.ok, true)
+  eq('applyStyle applied', styleResult.applied, true)
+  eq('applyStyle before is transparent', styleResult.before, 'rgba(0, 0, 0, 0)')
+  eq('applyStyle after is the inline value', styleResult.after, '#ff0000')
+  eq('camelCase property normalized', hero.style.getPropertyValue('background-color'), '#ff0000')
+  eq('kebabCase property works', runtime.applyStyle('#hero', 'font-size', '20px').applied, true)
+  eq('computed font-size updated', runtime.getDescriptor('#hero').styles.fontSize, '20px')
+  const badProperty = runtime.applyStyle('#hero', 'not a property!', 'x')
+  eq('invalid property rejected', badProperty.ok, false)
+  eq('invalid property reason', badProperty.reason, 'invalid-property')
+  const badValue = runtime.applyStyle('#hero', 'color', 'not-a-color')
+  eq('invalid value rejected', badValue.ok, false)
+  eq('invalid value reason', badValue.reason, 'invalid-value')
+  const dangerous = runtime.applyStyle('#hero', 'color', 'red;display:none')
+  eq('dangerous value rejected', dangerous.ok, false)
+  const removeResult = runtime.applyStyle('#hero', 'backgroundColor', '')
+  eq('empty value removes declaration', removeResult.ok, true)
+  eq('removed declaration leaves empty inline value', hero.style.getPropertyValue('background-color'), '')
+  eq('removal reports applied false', removeResult.applied, false)
+  eq('remove reports no inline value', runtime.applyStyle('#hero', 'font-size', '') .applied, false)
+  eq('applyStyle missing selector', runtime.applyStyle('#missing', 'color', 'red').ok, false)
+
+  section('applyText')
+  const textResult = runtime.applyText('#text-host', 'Hi ')
+  eq('applyText ok', textResult.ok, true)
+  eq('applyText before', textResult.before, 'Hello child world')
+  eq('applyText after', textResult.after, 'Hi child world')
+  ok('child element preserved', textHost.childNodes.indexOf(strongChild) !== -1)
+  eq('child text preserved', strongChild.textContent, 'child')
+  eq('text node mutated', textHost.childNodes[0].nodeValue, 'Hi ')
+  eq('applyText idempotent', runtime.applyText('#text-host', 'Hi ').ok, true)
+  const noTextResult = runtime.applyText('#no-text', 'x')
+  eq('applyText without direct text fails', noTextResult.ok, false)
+  eq('no-text-node reason', noTextResult.reason, 'no-text-node')
+  eq('no-text element keeps its child', noTextHost.children.length, 1)
+  eq('applyText missing selector', runtime.applyText('#missing', 'x').ok, false)
+
+  section('applyAttr')
+  eq('applyAttr set title', runtime.applyAttr('#link', 'title', 'hello').after, 'hello')
+  eq('applyAttr removes with empty value', runtime.applyAttr('#link', 'title', '').after, null)
+  eq('forbidden onclick rejected', runtime.applyAttr('#button', 'onclick', 'alert(1)').ok, false)
+  eq('forbidden onClick case-insensitive', runtime.applyAttr('#button', 'onClick', 'alert(1)').ok, false)
+  eq('forbidden style rejected', runtime.applyAttr('#button', 'style', 'color:red').ok, false)
+  eq('forbidden srcdoc rejected', runtime.applyAttr('#button', 'srcdoc', '<b>x</b>').ok, false)
+  eq('unsafe javascript href rejected', runtime.applyAttr('#link', 'href', 'javascript:alert(1)').ok, false)
+  eq('unsafe javascript href reason', runtime.applyAttr('#link', 'href', 'javascript:alert(1)').reason, 'unsafe-href')
+  eq('unsafe data href rejected', runtime.applyAttr('#link', 'href', 'data:text/html,x').ok, false)
+  eq('https href allowed', runtime.applyAttr('#link', 'href', 'https://example.com/b').ok, true)
+  eq('mailto href allowed', runtime.applyAttr('#link', 'href', 'mailto:a@b.c').ok, true)
+  eq('fragment href allowed', runtime.applyAttr('#link', 'href', '#section').ok, true)
+  eq('relative href allowed', runtime.applyAttr('#link', 'href', './other.html').ok, true)
+  eq('src on script rejected', runtime.applyAttr('#script', 'src', 'https://evil.test/x.js').ok, false)
+  eq('href on link rejected', runtime.applyAttr('#stylesheet', 'href', 'https://evil.test/x.css').ok, false)
+  eq('src on img allowed', runtime.applyAttr('#image', 'src', './photo.png').ok, true)
+  eq('invalid attribute name rejected', runtime.applyAttr('#button', 'bad name', 'x').ok, false)
+
+  section('reapply')
+  const reapplyResult = runtime.reapply([
+    { kind: 'style', selector: '#hero', property: 'color', value: 'rgb(1, 2, 3)' },
+    { kind: 'text', selector: '#title', value: '新标题' },
+    { kind: 'attr', selector: '#link', attrName: 'data-x', value: '1' },
+    { kind: 'attr', selector: '#missing', attrName: 'data-x', value: '1' },
+  ])
+  eq('reapply applied count', reapplyResult.applied, 3)
+  eq('reapply failed count', reapplyResult.failed, 1)
+  eq('reapply style applied', runtime.getDescriptor('#hero').styles.color, 'rgb(1, 2, 3)')
+  eq('reapply text applied', title.textContent, '新标题')
+  eq('reapply attr applied', link.getAttribute('data-x'), '1')
+  eq('reapply has result details', reapplyResult.results.length, 4)
+
+  section('selection-lost event')
+  runtime.setSelection('#destroyable')
+  eq('selection set before removal', runtime.getState().selection.id, 'destroyable')
+  destroyable.remove()
+  flushFrames()
+  const lost = flushEvents(runtime).filter((event) => event.type === 'selection-lost')
+  eq('selection-lost queued once', lost.length, 1)
+  eq('selection-lost selector', lost[0].selector, '#destroyable')
+  eq('selection cleared', runtime.getState().selection, null)
+
+  section('click selection and annotation popover')
+  runtime.setMode('annotate')
+  flushEvents(runtime)
+  dispatch(button, new FakeEvent('click', { target: button }))
+  const clickEvents = flushEvents(runtime)
+  ok('click queues select event', clickEvents.some((event) => event.type === 'select'))
+  eq('click selection tag', runtime.getState().selection.tag, 'button')
+  const rootAfterClick = document.querySelector('[data-dsh-nudge-root]')
+  ok('overlay root exists', !!rootAfterClick)
+  const popover = rootAfterClick && rootAfterClick.querySelector('[data-dsh-nudge="popover"]')
+  ok('popover rendered', !!popover)
+  ok('popover has textarea', !!rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]'))
+  ok('annotation composer has no style shortcut', !rootAfterClick.querySelector('[data-dsh-nudge="popover"] button[aria-label="Adjust styles"]'))
+  const textarea = rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]')
+  textarea.value = '把按钮改成主色'
+  dispatch(rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]'), new FakeEvent('click', { target: rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]') }))
+  const addEvents = flushEvents(runtime)
+  const addEvent = addEvents.find((event) => event.type === 'annotate-add')
+  ok('annotate-add queued', !!addEvent)
+  eq('annotation note', addEvent.annotation.note, '把按钮改成主色')
+  eq('annotation selector', addEvent.annotation.selector, runtime.getState().selection.selector)
+  eq('annotation stored', runtime.getState().annotations.length, 1)
+  eq('popover closed after add', rootAfterClick.querySelector('[data-dsh-nudge="popover"]'), null)
+  const renderedBadge = rootAfterClick.querySelector('[data-dsh-nudge="badge"]')
+  ok('annotation badge rendered', !!renderedBadge)
+  eq('annotation pin width', renderedBadge && renderedBadge.style.getPropertyValue('width'), '26px')
+
+  // Clicking the already-annotated element reopens its editor instead of
+  // starting a second annotation.
+  dispatch(button, new FakeEvent('click', { target: button }))
+  const annotatedPopover = rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]')
+  eq('clicking an annotated element prefills its note', annotatedPopover && annotatedPopover.value, '把按钮改成主色')
+  eq('clicking an annotated element does not create a duplicate', runtime.getState().annotations.length, 1)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  ok('annotated element editor closes with escape', rootAfterClick.querySelector('[data-dsh-nudge="popover"]') === null)
+
+  const floatingBar = rootAfterClick.querySelector('[data-dsh-nudge="bar"]')
+  ok('floating annotation bar rendered', !!floatingBar && floatingBar.style.getPropertyValue('display') === 'flex')
+  ok('page-side comment tray removed', rootAfterClick.querySelector('[data-dsh-nudge="tray"]') === null)
+  ok('floating bar has the codex action cluster', !!floatingBar && floatingBar.querySelectorAll('button').length >= 6)
+  ok('floating bar drag handle rendered', !!floatingBar && !!floatingBar.querySelector('button[aria-label="Move toolbar"]'))
+  ok('floating bar hides markers action rendered', !!floatingBar && !!floatingBar.querySelector('button[aria-label="Hide markers"]'))
+  const floatingBarSend = floatingBar && floatingBar.querySelector('button[aria-label="Send"]')
+  ok('floating bar send button rendered', !!floatingBarSend)
+  dispatch(floatingBarSend || floatingBar.querySelector('button'), new FakeEvent('click', { target: floatingBarSend || floatingBar.querySelector('button') }))
+  ok('floating bar send queues event', flushEvents(runtime).some((event) => event.type === 'annotation-send'))
+
+  // Hide markers collapses pins but keeps the toolbar; show markers restores them.
+  dispatch(floatingBar.querySelector('button[aria-label="Hide markers"]'), new FakeEvent('click', { target: floatingBar.querySelector('button[aria-label="Hide markers"]') }))
+  ok('hidden markers remove the pin', rootAfterClick.querySelector('[data-dsh-nudge="badge"]') === null)
+  ok('hidden markers keep the bar', floatingBar.style.getPropertyValue('display') === 'flex')
+  const showMarkers = floatingBar.querySelector('button[aria-label="Show markers"]')
+  ok('bar swaps to the show-markers action', !!showMarkers)
+  dispatch(showMarkers || floatingBar.querySelector('button'), new FakeEvent('click', { target: showMarkers || floatingBar.querySelector('button') }))
+  ok('show markers restore the pin', !!rootAfterClick.querySelector('[data-dsh-nudge="badge"]'))
+
+  // Discard is a two-step action: arm, then clear.
+  const discardButton = floatingBar.querySelector('button[aria-label="Discard annotations"]')
+  ok('discard action rendered', !!discardButton)
+  dispatch(discardButton, new FakeEvent('click', { target: discardButton }))
+  ok('first discard click only arms the action', runtime.getState().annotations.length === 1)
+  const armedDiscard = floatingBar.querySelector('button[aria-label="Click again to discard all annotations"]')
+  ok('discard action arms with a second-step label', !!armedDiscard)
+  dispatch(armedDiscard || discardButton, new FakeEvent('click', { target: armedDiscard || discardButton }))
+  ok('second discard click clears every annotation', runtime.getState().annotations.length === 0)
+
+  // Recreate one annotation so the downstream editor checks keep their fixture.
+  dispatch(button, new FakeEvent('click', { target: button }))
+  const restoredTextarea = rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]')
+  restoredTextarea.value = '把按钮改成主色'
+  dispatch(rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]'), new FakeEvent('click', { target: rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]') }))
+  flushEvents(runtime)
+  ok('annotation can be recreated after discard', runtime.getState().annotations.length === 1)
+  const recreatedBadge = rootAfterClick.querySelector('[data-dsh-nudge="badge"]')
+  dispatch(recreatedBadge, new FakeEvent('click', { target: recreatedBadge }))
+  ok('badge click opens editor', !!rootAfterClick.querySelector('[data-dsh-nudge="popover"]'))
+  eq('badge editor prefilled', rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]').value, '把按钮改成主色')
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  const annotationId = runtime.getState().annotations[0].id
+
+  section('annotation editor and update/remove')
+  const edited = runtime.openAnnotationEditor(annotationId)
+  eq('openAnnotationEditor ok', edited.ok, true)
+  const editorPopover = rootAfterClick.querySelector('[data-dsh-nudge="popover"]')
+  ok('editor popover rendered', !!editorPopover)
+  eq('editor prefilled', rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]').value, '把按钮改成主色')
+  const editorTextarea = rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]')
+  editorTextarea.value = '更新后的标注'
+  dispatch(rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]'), new FakeEvent('click', { target: rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]') }))
+  const updateEvents = flushEvents(runtime)
+  ok('annotate-update queued', updateEvents.some((event) => event.type === 'annotate-update'))
+  eq('annotation note updated', runtime.getState().annotations[0].note, '更新后的标注')
+  const updated = runtime.updateAnnotation(annotationId, '侧栏更新')
+  eq('updateAnnotation ok', updated.ok, true)
+  eq('updateAnnotation returns annotation', updated.annotation.note, '侧栏更新')
+  eq('updateAnnotation persisted', runtime.getState().annotations[0].note, '侧栏更新')
+  eq('removeAnnotation returns true', runtime.removeAnnotation(annotationId), true)
+  eq('annotation removed', runtime.getState().annotations.length, 0)
+  eq('removeAnnotation unknown returns false', runtime.removeAnnotation(annotationId), false)
+  eq('badge removed', rootAfterClick.querySelector('[data-dsh-nudge="badge"]'), null)
+
+  section('escape closes popover')
+  dispatch(hero, new FakeEvent('click', { target: hero }))
+  ok('popover open before escape', !!rootAfterClick.querySelector('[data-dsh-nudge="popover"]'))
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  eq('escape closes popover', rootAfterClick.querySelector('[data-dsh-nudge="popover"]'), null)
+
+  section('region drag')
+  runtime.setMode('annotate')
+  flushEvents(runtime)
+  dispatch(bodyTarget(), new FakeEvent('mousedown', { target: bodyTarget(), clientX: 700, clientY: 300, button: 0 }))
+  dispatch(document, new FakeEvent('mousemove', { target: document, clientX: 760, clientY: 340 }))
+  dispatch(document, new FakeEvent('mouseup', { target: document, clientX: 760, clientY: 340, button: 0 }))
+  const regionEvents = flushEvents(runtime)
+  const regionEvent = regionEvents.find((event) => event.type === 'region-select')
+  ok('region-select queued', !!regionEvent)
+  eq('region width', regionEvent.region.width, 60)
+  eq('region height', regionEvent.region.height, 40)
+  ok('region popover opened', !!rootAfterClick.querySelector('[data-dsh-nudge="popover"]'))
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  // A completed marquee suppresses the synthetic click that follows it.
+  await new Promise((resolve) => setTimeout(resolve, 480))
+
+  function bodyTarget() {
+    return document.body
+  }
+
+  section('locate')
+  runtime.setMode('browse')
+  const locateResult = runtime.locate('#hero')
+  eq('locate ok', locateResult.ok, true)
+  const flashNode = rootAfterClick && rootAfterClick.querySelector('[data-dsh-nudge="flash"]')
+  ok('locate draws a flash box', !!flashNode && flashNode.style.getPropertyValue('display') === 'block')
+  eq('locate selects element', runtime.getState().selection.id, 'hero')
+
+  section('Codex-style edit design card')
+  runtime.setMode('edit')
+  flushEvents(runtime)
+  dispatch(button, new FakeEvent('click', { target: button }))
+  const designRoot = document.querySelector('[data-dsh-nudge-root]')
+  const designCardEl = designRoot.querySelector('[data-dsh-nudge="design"]')
+  ok('design card rendered in edit mode', !!designCardEl)
+  const sectionButtons = designCardEl.querySelectorAll('button')
+  ok('design card exposes collapsible sections', sectionButtons.length >= 9)
+  const textEditor = designCardEl.querySelector('[data-dsh-nudge="design-text"]')
+  ok('text content is expanded by default', !!textEditor && textEditor.value === '按钮')
+  ok('typography is expanded by default', designCardEl.textContent.includes('Font size') && designCardEl.textContent.includes('Line height'))
+  ok('layout is collapsed by default', !designCardEl.textContent.includes('Width'))
+  const layoutHeader = designCardEl.querySelectorAll('button').find((button) => button.textContent === 'Layout')
+  ok('layout section header rendered', !!layoutHeader)
+  dispatch(layoutHeader, new FakeEvent('click', { target: layoutHeader }))
+  ok('layout section expands on click', designCardEl.textContent.includes('Width'))
+  ok('appearance stays collapsed', !designCardEl.textContent.includes('Border'))
+  ok('attributes section removed', !designCardEl.textContent.includes('Attributes'))
+  textEditor.value = '立即购买'
+  dispatch(textEditor, new FakeEvent('change', { target: textEditor }))
+  ok('text edit queues a design-text event', flushEvents(runtime).some((event) => event.type === 'design-text' && event.after === '立即购买'))
+  eq('text edit applies to the element', button.textContent, '立即购买')
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  eq('escape closes design card', designRoot.querySelector('[data-dsh-nudge="design"]'), null)
+  eq('cancel reverts the text edit', button.textContent, '按钮')
+  // The sidebar DOM panel is backed by these runtime APIs.
+  const domRoot = runtime.domChildren([])
+  ok('domChildren lists the root children', Array.isArray(domRoot) && domRoot.length > 0)
+  const bodyNode = domRoot.find((node) => node && node.tag === 'body')
+  ok('domChildren exposes the body node', !!bodyNode)
+  const bodyKids = bodyNode ? runtime.domChildren(bodyNode.path) : []
+  ok('domChildren lists nested children lazily', Array.isArray(bodyKids) && bodyKids.length > 0)
+  ok('domChildren entries carry a path and tag', bodyKids.every((node) => Array.isArray(node.path) && typeof node.tag === 'string'))
+  const focused = runtime.focusDomPath(bodyNode ? bodyNode.path : [])
+  eq('focusDomPath reports ok', focused.ok, true)
+  eq('focusDomPath selects the node', runtime.getState().selection && runtime.getState().selection.tag, 'body')
+  section('edit card without direct text')
+  runtime.setMode('edit')
+  flushEvents(runtime)
+  dispatch(noTextHost, new FakeEvent('click', { target: noTextHost }))
+  const emptyCard = document.querySelector('[data-dsh-nudge-root]').querySelector('[data-dsh-nudge="design"]')
+  ok('design card renders for an element without text', !!emptyCard)
+  ok('no text input when the element has no direct text', !!emptyCard && emptyCard.querySelector('[data-dsh-nudge="design-text"]') === null)
+  ok('text content section hidden without text', !!emptyCard && emptyCard.textContent.indexOf('Text content') === -1)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  runtime.setMode('browse')
+  flushEvents(runtime)
+
+  section('locale and theme')
+  runtime.setLocale({ title: '添加标注', subtitle: '为选中元素', placeholder: '描述修改意见', cancel: '取消', add: '添加', region: '区域' })
+  runtime.setTheme({ accent: '#ff5500', annotationAccent: '#00aa77', panelBg: '#111111', text: '#ffffff', border: '#333333', muted: '#999999', danger: '#ff0000', isDark: true })
+  runtime.setMode('annotate')
+  dispatch(sub, new FakeEvent('click', { target: sub }))
+  const localePopover = rootAfterClick.querySelector('[data-dsh-nudge="popover"]')
+  ok('localized popover rendered', !!localePopover)
+  eq('localized title', rootAfterClick.querySelector('[data-dsh-nudge="popover-title"]').textContent, '添加标注')
+  eq('localized cancel', rootAfterClick.querySelector('[data-dsh-nudge="popover-cancel"]').textContent, '取消')
+  eq('localized add', rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]').textContent, '添加')
+  eq('popover uses Codex dark surface', localePopover.style.getPropertyValue('background'), '#2f2f2f')
+  eq('themed selection outline uses annotation accent', rootAfterClick.querySelector('[data-dsh-nudge="selection"]').style.getPropertyValue('border-color'), '#00aa77')
+  // The injected overlay follows the host's DSH light palette, and a live flip
+  // repaints the already-open surfaces in place instead of only the popover shell.
+  runtime.setTheme({ accent: '#ff5500', annotationAccent: '#00aa77', panelBg: '#ffffff', text: '#0f1115', border: '#d9dde6', muted: '#61666b', danger: '#ff0000', isDark: false })
+  eq('open popover repaints to the light surface', localePopover.style.getPropertyValue('background'), '#ffffff')
+  eq('open popover text repaints to light ink', localePopover.style.getPropertyValue('color'), '#0f1115')
+  const lightAdd = rootAfterClick.querySelector('[data-dsh-nudge="popover-add"]')
+  eq('disabled add keeps the light disabled fill', lightAdd && lightAdd.style.getPropertyValue('background'), 'rgba(15,17,21,0.08)')
+  const shadowSheet = rootAfterClick.querySelector('style[data-dsh-nudge="style"]')
+  ok('composer placeholder follows the light ink', !!shadowSheet && shadowSheet.textContent.indexOf('rgba(15,17,21,0.50)') !== -1)
+  const lightTextarea = rootAfterClick.querySelector('[data-dsh-nudge="popover-textarea"]')
+  lightTextarea.value = '浅色主题'
+  dispatch(lightTextarea, new FakeEvent('input', { target: lightTextarea }))
+  eq('enabled add switches to the light submit fill', lightAdd.style.getPropertyValue('background'), '#0069FB')
+  eq('enabled add switches to the light submit ink', lightAdd.style.getPropertyValue('color'), '#ffffff')
+  dispatch(lightAdd, new FakeEvent('click', { target: lightAdd }))
+  flushEvents(runtime)
+  eq('annotation saved for the bar theme check', runtime.getState().annotations.length, 1)
+  const themedBar = rootAfterClick.querySelector('[data-dsh-nudge="bar"]')
+  ok('annotate bar stays visible in light mode', !!themedBar && themedBar.style.getPropertyValue('display') === 'flex')
+  eq('bottom annotate bar follows the light surface', themedBar && themedBar.style.getPropertyValue('background'), '#ffffff')
+  eq('bottom annotate bar text follows light ink', themedBar && themedBar.style.getPropertyValue('color'), '#0f1115')
+  // A live light -> dark flip must keep working (the host toggles the desktop theme).
+  runtime.setTheme({ accent: '#ff5500', annotationAccent: '#00aa77', panelBg: '#111111', text: '#ffffff', border: '#333333', muted: '#999999', danger: '#ff0000', isDark: true })
+  eq('bar returns to the dark surface after a flip', themedBar && themedBar.style.getPropertyValue('background'), '#262626')
+  dispatch(sub, new FakeEvent('click', { target: sub }))
+  const darkAgainPopover = rootAfterClick.querySelector('[data-dsh-nudge="popover"]')
+  eq('popover returns to the dark surface after a flip', darkAgainPopover && darkAgainPopover.style.getPropertyValue('background'), '#2f2f2f')
+  ok('composer placeholder returns to the dark ink', !!shadowSheet && shadowSheet.textContent.indexOf('rgba(255,255,255,0.42)') !== -1)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  const themedAnnotationId = runtime.getState().annotations[0] && runtime.getState().annotations[0].id
+  eq('theme-flip annotation cleaned up', runtime.removeAnnotation(themedAnnotationId), true)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+
+  section('Codex-style selection chrome')
+  runtime.setMode('annotate')
+  flushEvents(runtime)
+  dispatch(button, new FakeEvent('click', { target: button }))
+  const chromeRoot = document.querySelector('[data-dsh-nudge-root]')
+  const selectionNode = chromeRoot && chromeRoot.querySelector('[data-dsh-nudge="selection"]')
+  ok('selection chrome rendered', !!selectionNode)
+  eq('selection border is 2px', selectionNode && selectionNode.style.getPropertyValue('border-width'), '2px')
+  ok('selection fill is present', !!selectionNode && /0\.035/.test(selectionNode.style.getPropertyValue('background')))
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  flushEvents(runtime)
+
+  section('space passthrough')
+  dispatch(document, new FakeEvent('mousemove', { target: button, clientX: 420, clientY: 520 }))
+  eq('annotation cursor style injected', document.querySelectorAll('style[data-dsh-nudge-cursor-style]').length, 1)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: ' ', code: 'Space' }))
+  ok('passthrough attribute set', chromeRoot.getAttribute('data-dsh-nudge-passthrough') === 'true')
+  eq('native cursor style removed in passthrough', document.querySelectorAll('style[data-dsh-nudge-cursor-style]').length, 0)
+  dispatch(document, new FakeEvent('keyup', { target: document, key: ' ', code: 'Space' }))
+  eq('passthrough attribute cleared', chromeRoot.getAttribute('data-dsh-nudge-passthrough'), 'false')
+  eq('cursor style returns after release', document.querySelectorAll('style[data-dsh-nudge-cursor-style]').length, 1)
+  dispatch(document, new FakeEvent('keydown', { target: document, key: ' ', code: 'Space', shiftKey: true }))
+  eq('shift+space does not enter passthrough', chromeRoot.getAttribute('data-dsh-nudge-passthrough'), 'false')
+  dispatch(document, new FakeEvent('keydown', { target: document, key: ' ', code: 'Space' }))
+  eq('space re-enters passthrough', chromeRoot.getAttribute('data-dsh-nudge-passthrough'), 'true')
+  dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
+  eq('escape exits passthrough', chromeRoot.getAttribute('data-dsh-nudge-passthrough'), 'false')
+  runtime.setMode('browse')
+  flushEvents(runtime)
+
+  section('re-injection is idempotent')
+  const listenersBefore = listenerCount(document) + listenerCount(sandbox)
+  const oldRuntime = runtime
+  const secondStatus = vm.runInContext(source, sandbox, { filename: 'runtime.js' })
+  eq("re-injection returns 'ok'", secondStatus, 'ok')
+  const runtime2 = sandbox.__DSH_NUDGE__
+  ok('namespace replaced', runtime2 !== oldRuntime)
+  eq('version still 1', runtime2.version, 1)
+  const listenersAfter = listenerCount(document) + listenerCount(sandbox)
+  eq('listener count unchanged after re-injection', listenersAfter, listenersBefore)
+  eq('old instance reports destroyed', oldRuntime.setMode('annotate'), false)
+  runtime2.setMode('annotate')
+  eq('single overlay root after re-injection', document.querySelectorAll('[data-dsh-nudge-root]').length, 1)
+  runtime2.setMode('browse')
+  eq('page-info queued after re-injection', runtime2.drainEvents().some((event) => event.type === 'page-info'), true)
+
+  section('destroy')
+  runtime2.destroy()
+  eq('namespace removed', sandbox.__DSH_NUDGE__, null)
+  eq('overlay removed after destroy', document.querySelectorAll('[data-dsh-nudge-root]').length, 0)
+  eq('listeners removed after destroy', listenerCount(document), 0)
+  eq('window listeners removed after destroy', listenerCount(sandbox), 0)
+
+  process.stdout.write('\n' + checks + ' checks, ' + failures + ' failure(s)\n')
+  if (failures > 0) {
+    process.exitCode = 1
+    return
+  }
+  process.stdout.write('ok\n')
+}
+
+run().catch((error) => {
+  process.stderr.write('not ok - smoke test threw: ' + (error && error.stack ? error.stack : error) + '\n')
+  process.exitCode = 1
+})

@@ -1,0 +1,8 @@
+# dsh.nudge bundle patch.
+#
+# Applied as a profile patch layer after every in-box bundle. The Host half is a
+# single row; the Client half is loaded from `dsh.client` in package.json and
+# registers one right-Sidebar tab type plus its guide entry.
+- insert:
+    - id: nudge
+      name: 'dsh.nudge'
