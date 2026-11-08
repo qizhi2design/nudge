@@ -19,11 +19,16 @@
  * claims a source write before this half reports `synced`.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, normalize, posix, sep, win32 } from 'node:path'
+import { execFile } from 'node:child_process'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, normalize, posix, sep, win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import { syncEdits } from './source-sync.js'
 import { createWorkspaceDomain } from './workspace.js'
+
+const execFileAsync = promisify(execFile)
 
 /** Cordis plugin name. */
 export const name = 'dsh.nudge'
@@ -37,13 +42,31 @@ const REMOTE_NAMESPACE = 'nudge'
 /** Prefix on every remote failure message so the UI can attribute it. */
 const ERROR_PREFIX = 'nudge: '
 
-/** Defaults for the Loader row's config. */
+/**
+ * Defaults for the Loader row's config.
+ *
+ * The first block is the product-level Settings page (language + feature
+ * switches + context-menu switches). The second block is the internal
+ * URL/source mapping contract used by the source-sync and workspace domains;
+ * it stays configurable through the profile patch for power users but is not
+ * shown in the plugin settings page.
+ */
 const DEFAULT_CONFIG = Object.freeze({
+  language: 'auto',
+  enableAnnotate: true,
+  enableEdit: true,
+  enableDomTree: true,
+  enableWorkspaceVersions: true,
+  enableHotReload: true,
+  contextMenuLink: true,
+  contextMenuTab: true,
   sourceRoot: '',
   urlRoot: '',
   maxScanFiles: 400,
   maxFileBytes: 2_000_000,
 })
+
+const LANGUAGES = Object.freeze(['auto', 'zh', 'en'])
 
 /** One native Schemastery object node is enough for the live Config inspector. */
 function nativeConfigNode(type, meta) {
@@ -55,6 +78,38 @@ export const Config = nativeConfigNode('object', {
   description: 'dsh.nudge configuration.',
 })
 Config.dict = {
+  language: nativeConfigNode('string', {
+    default: DEFAULT_CONFIG.language,
+    description: 'Plugin UI language: auto (follow DSH), zh, or en.',
+  }),
+  enableAnnotate: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableAnnotate,
+    description: 'Show the annotation mode in the Nudge toolbar.',
+  }),
+  enableEdit: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableEdit,
+    description: 'Show the live style/text editing mode in the Nudge toolbar.',
+  }),
+  enableDomTree: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableDomTree,
+    description: 'Show the DOM tree dock in the Nudge toolbar.',
+  }),
+  enableWorkspaceVersions: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableWorkspaceVersions,
+    description: 'Show the workspace versions / git commit dock in the Nudge toolbar.',
+  }),
+  enableHotReload: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableHotReload,
+    description: 'Enable the workspace file watcher and the automatic page reload.',
+  }),
+  contextMenuLink: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.contextMenuLink,
+    description: 'Add "Open in Nudge" to the link (and message-link) right-click menu.',
+  }),
+  contextMenuTab: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.contextMenuTab,
+    description: 'Add "Open in Nudge" to the browser tab actions menu.',
+  }),
   sourceRoot: nativeConfigNode('string', {
     default: DEFAULT_CONFIG.sourceRoot,
     description:
@@ -92,20 +147,45 @@ Config['~standard'] = configStandardSchema
 
 function normalizeConfig(value) {
   const raw = value && typeof value === 'object' ? value : {}
-  const text = (candidate, fallback) =>
-    typeof candidate === 'string' ? candidate.trim() : fallback
+  const text = (candidate, fallback) => (typeof candidate === 'string' ? candidate.trim() : fallback)
   const number = (candidate, fallback, min, max) => {
     const parsed = typeof candidate === 'number' ? candidate : NaN
     if (!Number.isFinite(parsed)) return fallback
     return Math.min(max, Math.max(min, Math.floor(parsed)))
   }
+  const bool = (candidate, fallback) => (typeof candidate === 'boolean' ? candidate : fallback)
+  const language = LANGUAGES.includes(raw.language) ? raw.language : DEFAULT_CONFIG.language
   return {
+    language,
+    enableAnnotate: bool(raw.enableAnnotate, DEFAULT_CONFIG.enableAnnotate),
+    enableEdit: bool(raw.enableEdit, DEFAULT_CONFIG.enableEdit),
+    enableDomTree: bool(raw.enableDomTree, DEFAULT_CONFIG.enableDomTree),
+    enableWorkspaceVersions: bool(raw.enableWorkspaceVersions, DEFAULT_CONFIG.enableWorkspaceVersions),
+    enableHotReload: bool(raw.enableHotReload, DEFAULT_CONFIG.enableHotReload),
+    contextMenuLink: bool(raw.contextMenuLink, DEFAULT_CONFIG.contextMenuLink),
+    contextMenuTab: bool(raw.contextMenuTab, DEFAULT_CONFIG.contextMenuTab),
     sourceRoot: text(raw.sourceRoot, DEFAULT_CONFIG.sourceRoot),
     urlRoot: text(raw.urlRoot, DEFAULT_CONFIG.urlRoot),
     maxScanFiles: number(raw.maxScanFiles, DEFAULT_CONFIG.maxScanFiles, 20, 5000),
     maxFileBytes: number(raw.maxFileBytes, DEFAULT_CONFIG.maxFileBytes, 16_384, 16_000_000),
   }
 }
+
+/** Product-level preferences the Settings page may read and write. */
+const SETTINGS_FIELDS = Object.freeze([
+  'language',
+  'enableAnnotate',
+  'enableEdit',
+  'enableDomTree',
+  'enableWorkspaceVersions',
+  'enableHotReload',
+  'contextMenuLink',
+  'contextMenuTab',
+])
+
+/** Package facts for the Settings → 关于与更新 card. */
+const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+const BUILD_ARTIFACTS = Object.freeze(['client.js', 'index.js', 'runtime.js', 'workspace.js'])
 
 function reasonOf(error) {
   if (error instanceof Error) return error.message
@@ -120,6 +200,97 @@ function reasonOf(error) {
 function remoteError(error) {
   const text = reasonOf(error)
   return new Error(ERROR_PREFIX + text.replace(/^nudge:\s*/, ''))
+}
+
+// ------------------------------------------------------- about / updates
+
+/** Read the plugin package version and the build artifact timestamps. */
+async function readPluginFacts() {
+  let version = '0.0.0'
+  try {
+    const raw = await readFile(join(PACKAGE_ROOT, 'package.json'), 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed !== null && typeof parsed === 'object' && typeof parsed.version === 'string') {
+      version = parsed.version
+    }
+  } catch {
+    /* keep the fallback version */
+  }
+  const builds = []
+  for (const artifact of BUILD_ARTIFACTS) {
+    try {
+      const info = await stat(join(PACKAGE_ROOT, 'lib', artifact))
+      builds.push({ name: artifact, mtime: info.mtimeMs, size: info.size })
+    } catch {
+      /* a partial build is reported by omission */
+    }
+  }
+  return { version, pluginRoot: PACKAGE_ROOT, builds }
+}
+
+/** Read the plugin repository's branch/commit/dirty facts (local only). */
+async function readGitFacts() {
+  const run = async (args) => {
+    const result = await execFileAsync('git', args, {
+      cwd: PACKAGE_ROOT,
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    })
+    return String(result.stdout || '').trim()
+  }
+  try {
+    const branch = await run(['rev-parse', '--abbrev-ref', 'HEAD'])
+    const commit = await run(['rev-parse', '--short', 'HEAD'])
+    const status = await run(['status', '--porcelain'])
+    let remote = null
+    try {
+      remote = (await run(['remote', 'get-url', 'origin'])) || null
+    } catch {
+      remote = null
+    }
+    return { available: true, branch, commit, dirty: status.length > 0, remote }
+  } catch (error) {
+    return { available: false, error: reasonOf(error) }
+  }
+}
+
+/**
+ * Ask the Plugin Manager for published versions newer than this installation.
+ * A locally linked package (the development setup) is not a registry package,
+ * so the manager reports it as not updatable — surfaced honestly to the page.
+ */
+async function checkPluginUpdates(ctx) {
+  const manager = ctx.get('pluginManager')
+  if (
+    manager === undefined ||
+    manager === null ||
+    typeof manager.listVersions !== 'function'
+  ) {
+    return { status: 'unavailable', reason: 'plugin-manager-unavailable' }
+  }
+  try {
+    const result = await manager.listVersions(name)
+    if (result !== null && typeof result === 'object' && result.status === 'listed') {
+      const versions = Array.isArray(result.versions) ? result.versions : []
+      const latest = versions.length > 0 ? versions[0] : undefined
+      return {
+        status: latest === undefined ? 'current' : 'available',
+        installed: result.installed,
+        latest: latest === undefined ? undefined : latest.version,
+        versions: versions.map((entry) => entry.version),
+        registry: result.registry,
+      }
+    }
+    return {
+      status: 'unavailable',
+      reason: result !== null && typeof result === 'object' ? result.problem : 'unknown',
+      message: result !== null && typeof result === 'object' ? result.reason : undefined,
+    }
+  } catch (error) {
+    return { status: 'error', message: reasonOf(error) }
+  }
 }
 
 /** PATH flavour helper for the platform that owns a path. */
@@ -273,10 +444,10 @@ export function apply(ctx, rawConfig) {
     return { editor, entry }
   }
 
-  /** Config keys the Settings page may write. */
-  const CONFIG_FIELDS = ['sourceRoot', 'urlRoot', 'maxScanFiles', 'maxFileBytes']
+  /** Product-level config keys the Settings page may write. */
+  const CONFIG_FIELDS = SETTINGS_FIELDS
 
-  /** Project a raw row config layer into the four editable fields. */
+  /** Project a raw row config layer into the editable product fields. */
   function configLayerOf(entryConfig) {
     const out = {}
     if (entryConfig === null || typeof entryConfig !== 'object') return out
@@ -295,18 +466,25 @@ export function apply(ctx, rawConfig) {
     },
 
     /**
-     * Settings page snapshot: the effective config, the schema defaults, and
-     * whether this deployment lets a user write it. `overridden` names the
-     * fields the profile patch currently pins explicitly.
+     * Settings page snapshot: the effective product preferences (language and
+     * the feature/context-menu switches), their schema defaults, and whether
+     * this deployment lets a user write them. `overridden` names the fields the
+     * profile patch currently pins explicitly.
      */
     async config() {
       try {
         const binding = configEditorBinding()
         const layer = binding === undefined ? {} : configLayerOf(binding.entry.options?.config)
         const values = normalizeConfig({ ...config, ...layer })
+        const productValues = {}
+        const defaults = {}
+        for (const key of CONFIG_FIELDS) {
+          productValues[key] = values[key]
+          defaults[key] = DEFAULT_CONFIG[key]
+        }
         return {
-          values,
-          defaults: { ...DEFAULT_CONFIG },
+          values: productValues,
+          defaults,
           overridden: Object.keys(layer),
           writable: binding !== undefined,
           source: binding === undefined ? 'loader' : 'profile',
@@ -317,9 +495,9 @@ export function apply(ctx, rawConfig) {
     },
 
     /**
-     * Persist a partial config patch into the profile layer. Only the four
-     * documented fields are accepted; everything else in the patch is ignored
-     * so a stale Client cannot resurrect removed or foreign keys.
+     * Persist a partial config patch into the profile layer. Only the product
+     * preferences are accepted; everything else in the patch is ignored so a
+     * stale Client cannot resurrect removed or foreign keys.
      */
     async configUpdate(patch) {
       try {
@@ -329,8 +507,14 @@ export function apply(ctx, rawConfig) {
         }
         const input = patch !== null && typeof patch === 'object' ? patch : {}
         const fields = configLayerOf(input)
+        const productValues = (source) => {
+          const out = {}
+          for (const key of CONFIG_FIELDS) out[key] = source[key]
+          return out
+        }
         if (Object.keys(fields).length === 0) {
-          return { values: normalizeConfig({ ...config, ...configLayerOf(binding.entry.options?.config) }), saved: false }
+          const current = normalizeConfig({ ...config, ...configLayerOf(binding.entry.options?.config) })
+          return { values: productValues(current), saved: false }
         }
         const next = normalizeConfig({ ...config, ...fields })
         const accepted = {}
@@ -339,7 +523,37 @@ export function apply(ctx, rawConfig) {
           ...(current !== null && typeof current === 'object' ? current : {}),
           ...accepted,
         }))
-        return { values: next, saved: true }
+        return { values: productValues(next), saved: true }
+      } catch (error) {
+        throw remoteError(error)
+      }
+    },
+
+    /**
+     * Settings → 关于与更新 snapshot: package version, build artifact times,
+     * local git facts, runtime facts and (optionally) a published-version check.
+     * Designed for the local-link development install: it never claims a newer
+     * version exists when the plugin manager reports the install as not
+     * updatable.
+     */
+    async about(check) {
+      try {
+        const facts = await readPluginFacts()
+        const git = await readGitFacts()
+        const update = check === true ? await checkPluginUpdates(ctx) : { status: 'unchecked' }
+        return {
+          name,
+          version: facts.version,
+          pluginRoot: facts.pluginRoot,
+          builds: facts.builds,
+          git,
+          update,
+          runtime: {
+            node: process.version,
+            platform: process.platform,
+            arch: process.arch,
+          },
+        }
       } catch (error) {
         throw remoteError(error)
       }
@@ -552,6 +766,7 @@ export function apply(ctx, rawConfig) {
       remoteInvocation('ping', []),
       remoteInvocation('config', []),
       remoteInvocation('configUpdate', ['patch']),
+      remoteInvocation('about', ['check']),
       remoteInvocation('session', ['session']),
       remoteInvocation('sync', ['session', 'page', 'edits']),
       remoteInvocation('saveScreenshot', ['session', 'annotationId', 'dataUrl']),

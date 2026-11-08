@@ -252,16 +252,6 @@ function createRemote(behavior) {
   return { calls, call }
 }
 
-const SNAPSHOT = {
-  values: { sourceRoot: '', urlRoot: 'http://127.0.0.1:4173', maxScanFiles: 100, maxFileBytes: 2000000 },
-  defaults: { sourceRoot: '', urlRoot: '', maxScanFiles: 400, maxFileBytes: 2000000 },
-  overridden: ['urlRoot', 'maxScanFiles'],
-  writable: true,
-  source: 'profile',
-}
-
-// ------------------------------------------------------------- render helpers
-
 function textOf(node) {
   if (node === null || node === undefined || node === false) return ''
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -281,76 +271,238 @@ function findNodes(tree, predicate, out = []) {
   return out
 }
 
-function fieldInput(tree, label) {
-  return findNodes(tree, (node) => node.type === 'input' && node.props['aria-label'] === label)[0]
-}
-
 async function settle(component, props, runtimeRef, until) {
   let rendered = runtimeRef.render(component, props)
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await flush()
+  for (let attempt = 0; attempt < 14; attempt += 1) {
     if (until(rendered.tree)) return rendered
+    await flush()
     rendered = runtimeRef.render(component, props)
   }
   return rendered
 }
 
-// ------------------------------------------------------------- read → save
-
-{
-  runtime.reset()
-  const remote = createRemote((endpoint) => (endpoint === 'config' ? SNAPSHOT : { saved: false, values: SNAPSHOT.values }))
-  ctx.connection = { rpc: { call: remote.call } }
-  const props = { ctx, t: locale.bind()('settings') }
-  runtime.render(sectionEntry.component, props)
-  await flush()
-  const loadedView = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.sourceRoot'))
-  const loadedText = textOf(loadedView.tree)
-  assert(loadedText.includes('settings.title'), 'page renders its title')
-  assert(loadedText.includes('settings.sourceRoot'), 'page renders the source-root field')
-  assert(loadedText.includes('settings.urlRoot'), 'page renders the url-root field')
-  assert(loadedText.includes('settings.maxScanFiles'), 'page renders the scan-limit field')
-  assert(loadedText.includes('settings.maxFileBytes'), 'page renders the file-size field')
-  assert(loadedText.includes('settings.overridden'), 'page marks the overridden fields')
-  const scanInput = fieldInput(loadedView.tree, 'settings.maxScanFiles')
-  assert(scanInput !== undefined && scanInput.props.value === '100', 'page seeds the field from the Host snapshot')
-  assert(scanInput.props.disabled === false, 'page keeps the field editable when writing is allowed')
-
-  scanInput.props.onChange({ target: { value: '250' } })
-  const edited = await settle(sectionEntry.component, props, runtime, (tree) => {
-    const input = fieldInput(tree, 'settings.maxScanFiles')
-    return input !== undefined && input.props.value === '250'
-  })
-  assert(fieldInput(edited.tree, 'settings.maxScanFiles').props.value === '250', 'edit updates the staged draft')
-
-  const saveButton = findNodes(edited.tree, (node) => node.type === 'button' && textOf(node) === 'settings.save')[0]
-  assert(saveButton !== undefined, 'page renders the save button')
-  saveButton.props.onClick()
-  const savedView = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.saved'))
-  assert(textOf(savedView.tree).includes('settings.saved'), 'save reports success')
-  const updateCall = remote.calls.find((entry) => entry.name === 'nudge/configUpdate')
-  assert(updateCall !== undefined, 'save calls the Host configUpdate endpoint')
-  assert(updateCall.args.patch.maxScanFiles === 250, 'save writes the edited field')
-  assert(!Object.prototype.hasOwnProperty.call(updateCall.args.patch, 'urlRoot'), 'save leaves untouched fields out of the patch')
+const PRODUCT_VALUES = {
+  language: 'auto',
+  enableAnnotate: true,
+  enableEdit: true,
+  enableDomTree: true,
+  enableWorkspaceVersions: true,
+  enableHotReload: true,
+  contextMenuLink: true,
+  contextMenuTab: true,
+}
+const PRODUCT_DEFAULTS = { ...PRODUCT_VALUES }
+const SNAPSHOT = {
+  values: { ...PRODUCT_VALUES },
+  defaults: { ...PRODUCT_DEFAULTS },
+  overridden: ['language'],
+  writable: true,
+  source: 'profile',
+}
+const ABOUT = {
+  name: 'dsh.nudge',
+  version: '0.2.0',
+  pluginRoot: '/Users/example/visual-inspector/plugin',
+  builds: [{ name: 'client.js', mtime: 1760000000000, size: 600000 }],
+  git: { available: true, branch: 'main', commit: 'abc1234', dirty: true, remote: null },
+  update: { status: 'unchecked' },
+  runtime: { node: 'v24.0.0', platform: 'darwin', arch: 'arm64' },
 }
 
-// ------------------------------------------------------------- read-only
+function aboutPayload(check) {
+  return Object.assign({}, ABOUT, {
+    update: check === true ? { status: 'unavailable', reason: 'not-updatable', message: 'local link install' } : { status: 'unchecked' },
+  })
+}
+
+function behavior(endpoint, args) {
+  if (endpoint === 'config') return SNAPSHOT
+  if (endpoint === 'about') return aboutPayload(args && args.check === true)
+  if (endpoint === 'configUpdate') {
+    const patch = args && args.patch ? args.patch : {}
+    return { saved: true, values: Object.assign({}, PRODUCT_VALUES, patch) }
+  }
+  return {}
+}
+
+function sectionProps() {
+  return { ctx, t: locale.bind()('settings') }
+}
+
+function switchNode(tree, label) {
+  return findNodes(tree, (node) => node.type === 'button' && node.props.role === 'switch' && node.props['aria-label'] === label)[0]
+}
+function buttonByText(tree, text) {
+  return findNodes(tree, (node) => node.type === 'button' && textOf(node) === text)[0]
+}
+function lastCall(calls, endpoint) {
+  const matching = calls.filter((entry) => entry.name === 'nudge/' + endpoint)
+  return matching[matching.length - 1]
+}
+
+// ------------------------------------------------------- render + controls
 
 {
   runtime.reset()
-  const readOnlySnapshot = { ...SNAPSHOT, writable: false, source: 'loader' }
-  const remote = createRemote(() => readOnlySnapshot)
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
   ctx.connection = { rpc: { call: remote.call } }
-  const props = { ctx, t: locale.bind()('settings') }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  const view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.sectionGeneral'))
+  const text = textOf(view.tree)
+  assert(text.includes('settings.sectionGeneral'), 'page renders the General section')
+  assert(text.includes('settings.sectionFeatures'), 'page renders the Features section')
+  assert(text.includes('settings.sectionContextMenu'), 'page renders the Context menu section')
+  assert(text.includes('settings.sectionAbout'), 'page renders the About section')
+  assert(text.includes('settings.language'), 'page renders the language row')
+  assert(text.includes('settings.featureAnnotate'), 'page renders the annotation switch')
+  assert(text.includes('settings.contextMenuLink'), 'page renders the link context-menu switch')
+  assert(text.includes('settings.aboutVersion') && text.includes('0.2.0'), 'page renders the plugin version')
+  assert(text.includes('abc1234') && text.includes('main'), 'page renders the git branch and commit')
+  assert(text.includes('settings.updateUnchecked'), 'page renders the initial update status')
+  assert(!text.includes('settings.sourceRoot'), 'legacy source-root field is gone')
+  assert(!text.includes('settings.maxScanFiles'), 'legacy scan-limit field is gone')
+  const annotateSwitch = switchNode(view.tree, 'settings.featureAnnotate')
+  assert(annotateSwitch !== undefined && annotateSwitch.props['aria-checked'] === true, 'feature switch reflects the Host value')
+  const languageZh = buttonByText(view.tree, 'settings.languageZh')
+  assert(languageZh !== undefined, 'language switch offers 中文')
+}
+
+// ------------------------------------------------------------- feature save
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.featureAnnotate'))
+  switchNode(view.tree, 'settings.featureAnnotate').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.saved'))
+  assert(textOf(view.tree).includes('settings.saved'), 'switching a feature reports success')
+  const updateCall = lastCall(remote.calls, 'configUpdate')
+  assert(updateCall !== undefined, 'feature switch calls configUpdate')
+  assert(updateCall.args.patch.enableAnnotate === false, 'feature switch writes enableAnnotate=false')
+  // The stored value is the single source of truth for the toolbar; the fake
+  // harness re-runs effects on every manual render, so assert the store.
+  assert(exportsObject.__test.pluginConfigValues().enableAnnotate === false, 'saved switch reaches the Client config store')
+}
+
+// ------------------------------------------------------- context-menu save
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.contextMenuTab'))
+  switchNode(view.tree, 'settings.contextMenuTab').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.saved'))
+  const updateCall = lastCall(remote.calls, 'configUpdate')
+  assert(updateCall !== undefined && updateCall.args.patch.contextMenuTab === false, 'context-menu switch writes its field')
+}
+
+// ---------------------------------------------------------------- language
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.languageZh'))
+  buttonByText(view.tree, 'settings.languageZh').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('已保存'))
+  const updateCall = lastCall(remote.calls, 'configUpdate')
+  assert(updateCall !== undefined && updateCall.args.patch.language === 'zh', 'language switch writes language=zh')
+  assert(textOf(view.tree).includes('通用'), 'plugin UI switches to Chinese without a reload')
+  assert(textOf(view.tree).includes('已保存'), 'saved message uses the selected language')
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+}
+
+// ----------------------------------------------------------- restore default
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.reset'))
+  buttonByText(view.tree, 'settings.reset').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.resetDone'))
+  assert(textOf(view.tree).includes('settings.resetDone'), 'restore defaults reports success')
+  const updateCall = lastCall(remote.calls, 'configUpdate')
+  assert(updateCall !== undefined, 'restore defaults calls configUpdate')
+  Object.keys(PRODUCT_DEFAULTS).forEach((key) => {
+    assert(updateCall.args.patch[key] === PRODUCT_DEFAULTS[key], 'restore defaults writes ' + key)
+  })
+}
+
+// ------------------------------------------------------------ update check
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote(behavior)
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.checkUpdate'))
+  buttonByText(view.tree, 'settings.checkUpdate').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updateUnavailable'))
+  assert(textOf(view.tree).includes('settings.updateUnavailable'), 'local-link install reports the honest update status')
+  const checkedCalls = remote.calls.filter((entry) => entry.name === 'nudge/about' && entry.args && entry.args.check === true)
+  assert(checkedCalls.length === 1, 'update check asks the Host with check=true exactly once')
+}
+
+// ---------------------------------------------------------------- read-only
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const readOnlySnapshot = Object.assign({}, SNAPSHOT, { writable: false, source: 'loader' })
+  const remote = createRemote((endpoint, args) => {
+    if (endpoint === 'config') return readOnlySnapshot
+    if (endpoint === 'about') return aboutPayload(false)
+    return behavior(endpoint, args)
+  })
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
   runtime.render(sectionEntry.component, props)
   await flush()
   const view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.readOnly'))
   assert(textOf(view.tree).includes('settings.readOnly'), 'page explains the read-only deployment')
-  const input = fieldInput(view.tree, 'settings.sourceRoot')
-  assert(input.props.disabled === true, 'read-only deployment disables the fields')
-  const saveButton = findNodes(view.tree, (node) => node.type === 'button' && textOf(node) === 'settings.save')[0]
-  assert(saveButton.props.disabled === true, 'read-only deployment disables the save button')
-  assert(remote.calls.every((entry) => entry.name === 'nudge/config'), 'read-only page never calls configUpdate')
+  const toggle = switchNode(view.tree, 'settings.featureAnnotate')
+  assert(toggle !== undefined && toggle.props.disabled === true, 'read-only deployment disables feature switches')
+  assert(remote.calls.every((entry) => entry.name !== 'nudge/configUpdate'), 'read-only page never calls configUpdate')
+}
+
+// -------------------------------------------------------------- load error
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote((endpoint) => (endpoint === 'config' ? { __error: 'profile unavailable' } : aboutPayload(false)))
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  const view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.loadFailed'))
+  assert(textOf(view.tree).includes('settings.loadFailed'), 'page reports a failed config read')
+  assert(textOf(view.tree).includes('profile unavailable'), 'page keeps the bridge error message')
 }
 
 if (failures > 0) {

@@ -206,21 +206,32 @@ const api = state.provided && state.provided.service
 assert(api !== null && typeof api === 'object', 'apply provides the nudge service')
 assert(state.provided.name === 'nudge', 'service namespace is nudge')
 assert(state.typert && Array.isArray(state.typert.invocations), 'typert contribution registered')
-assert(state.typert.invocations.length === 14, 'fourteen remote invocations registered')
+assert(state.typert.invocations.length === 15, 'fifteen remote invocations registered')
 
 const facts = await api.session('session-1')
 assert(facts.cwd === workspace, 'session endpoint resolves the workspace cwd')
 assert(facts.writable === true, 'workspace-write modes report writable')
 assert(facts.sourceRoot === workspace, 'default sourceRoot is the session cwd')
 
-// 0. Settings page bridge: the profile config editor owns the row config.
+// 0. Settings page bridge: product preferences live in the profile config row.
 const readOnlySnapshot = await api.config()
 assert(readOnlySnapshot.writable === false, 'config snapshot is read-only without a config editor')
-assert(readOnlySnapshot.values.maxScanFiles === 100, 'config snapshot reports the mounted row config')
-assert(readOnlySnapshot.values.sourceRoot === '', 'config snapshot normalises the mounted row config')
-assert(JSON.stringify(readOnlySnapshot.defaults) === JSON.stringify({ sourceRoot: '', urlRoot: '', maxScanFiles: 400, maxFileBytes: 2000000 }), 'config snapshot reports the schema defaults')
+assert(readOnlySnapshot.values.language === 'auto', 'config snapshot reports the default language')
+assert(readOnlySnapshot.values.enableAnnotate === true, 'config snapshot reports the feature defaults')
+assert(!Object.prototype.hasOwnProperty.call(readOnlySnapshot.values, 'sourceRoot'), 'settings snapshot hides the internal mapping fields')
+assert(
+  Object.keys(readOnlySnapshot.defaults).sort().join(',') ===
+    ['contextMenuLink', 'contextMenuTab', 'enableAnnotate', 'enableDomTree', 'enableEdit', 'enableHotReload', 'enableWorkspaceVersions', 'language'].sort().join(','),
+  'config snapshot reports the product defaults',
+)
 
-const entry = { options: { id: 'nudge', name: 'dsh.nudge', config: { urlRoot: 'http://127.0.0.1:4173' } } }
+const entry = {
+  options: {
+    id: 'nudge',
+    name: 'dsh.nudge',
+    config: { language: 'zh', enableAnnotate: false, urlRoot: 'http://127.0.0.1:4173' },
+  },
+}
 const writes = []
 state.extra.configEditor = {
   entries() {
@@ -234,25 +245,70 @@ state.extra.configEditor = {
 }
 const writableSnapshot = await api.config()
 assert(writableSnapshot.writable === true, 'config snapshot is writable with the profile editor')
-assert(writableSnapshot.overridden.length === 1 && writableSnapshot.overridden[0] === 'urlRoot', 'config snapshot names the overridden fields')
+assert(writableSnapshot.values.language === 'zh', 'config snapshot reflects the overridden language')
+assert(writableSnapshot.values.enableAnnotate === false, 'config snapshot reflects the overridden feature switch')
+assert(
+  writableSnapshot.overridden.includes('language') && writableSnapshot.overridden.includes('enableAnnotate'),
+  'config snapshot names the overridden product fields',
+)
+assert(!writableSnapshot.overridden.includes('urlRoot'), 'internal mapping fields are not reported as product overrides')
 
-const saved = await api.configUpdate({ maxScanFiles: 250, urlRoot: 'http://127.0.0.1:5199/' })
-assert(saved.saved === true && saved.values.maxScanFiles === 250, 'configUpdate reports the accepted values')
-assert(writes.length === 1 && writes[0].maxScanFiles === 250, 'configUpdate writes the patched field')
-assert(writes[0].urlRoot === 'http://127.0.0.1:5199/', 'configUpdate writes the second patched field')
-assert(!Object.prototype.hasOwnProperty.call(writes[0], 'sourceRoot'), 'configUpdate leaves unpatched fields out of the patch')
+const saved = await api.configUpdate({ enableEdit: false, language: 'en' })
+assert(saved.saved === true && saved.values.enableEdit === false, 'configUpdate reports the accepted feature switch')
+assert(saved.values.language === 'en', 'configUpdate reports the accepted language')
+assert(writes.length === 1 && writes[0].enableEdit === false, 'configUpdate writes the feature switch')
+assert(writes[0].language === 'en', 'configUpdate writes the language')
+assert(!Object.prototype.hasOwnProperty.call(writes[0], 'sourceRoot'), 'configUpdate leaves internal fields out of the patch')
 const afterSave = await api.config()
-assert(afterSave.values.maxScanFiles === 250, 'config snapshot reflects the written profile layer')
-assert(afterSave.values.maxFileBytes === 2000000, 'unpatched fields keep the mounted config')
-assert(afterSave.overridden.includes('maxScanFiles'), 'config snapshot lists the newly overridden field')
+assert(afterSave.values.enableEdit === false, 'config snapshot reflects the written feature switch')
+assert(afterSave.overridden.includes('enableEdit'), 'config snapshot lists the newly overridden switch')
 
-const clamped = await api.configUpdate({ maxFileBytes: 12345 })
-assert(clamped.values.maxFileBytes === 16384, 'out-of-range numbers clamp to the documented bounds')
-const ignored = await api.configUpdate({ foreign: 'value' })
-assert(ignored.saved === false, 'configUpdate ignores unknown fields')
-assert(Object.keys(writes[1]).length === 3, 'unknown fields never reach the profile patch')
-const defaults = await api.configUpdate({ sourceRoot: '', urlRoot: '', maxScanFiles: 400, maxFileBytes: 2000000 })
-assert(defaults.saved === true, 'configUpdate accepts the defaults patch')
+const ignored = await api.configUpdate({ foreign: 'value', urlRoot: 'https://example.test/' })
+assert(ignored.saved === false, 'configUpdate ignores unknown and internal fields')
+assert(writes.length === 1, 'unknown fields never reach the profile patch')
+assert(writes[0].urlRoot === 'http://127.0.0.1:4173', 'internal mapping config is preserved untouched')
+
+const clampedLanguage = await api.configUpdate({ language: 'xx' })
+assert(clampedLanguage.values.language === 'auto', 'invalid language falls back to auto')
+const invalidBoolean = await api.configUpdate({ enableHotReload: 'no' })
+assert(invalidBoolean.values.enableHotReload === true, 'invalid booleans fall back to the default')
+const resetPatch = {
+  language: 'auto',
+  enableAnnotate: true,
+  enableEdit: true,
+  enableDomTree: true,
+  enableWorkspaceVersions: true,
+  enableHotReload: true,
+  contextMenuLink: true,
+  contextMenuTab: true,
+}
+const defaults = await api.configUpdate(resetPatch)
+assert(defaults.saved === true, 'configUpdate accepts the product defaults patch')
+
+// 0b. About & update snapshot: package/build/git facts, honest update check.
+const about = await api.about(false)
+assert(about.name === 'dsh.nudge', 'about reports the package name')
+assert(typeof about.version === 'string' && about.version.length > 0, 'about reports the package version', about.version)
+assert(typeof about.pluginRoot === 'string' && about.pluginRoot.endsWith('plugin'), 'about reports the plugin root', about.pluginRoot)
+assert(Array.isArray(about.builds) && about.builds.some((build) => build.name === 'client.js'), 'about reports the built client artifact')
+assert(about.git !== null && typeof about.git === 'object', 'about reports git facts')
+if (about.git.available === true) {
+  assert(typeof about.git.branch === 'string' && about.git.branch.length > 0, 'about reports the git branch')
+  assert(typeof about.git.commit === 'string' && about.git.commit.length > 0, 'about reports the short commit')
+}
+assert(about.update.status === 'unchecked', 'about skips the update check unless asked')
+assert(typeof about.runtime.node === 'string', 'about reports the runtime node version')
+state.extra.pluginManager = {
+  async listVersions() {
+    return { status: 'listed', installed: about.version, registry: 'npm', versions: [{ version: '9.9.9' }], attempts: [] }
+  },
+}
+const checked = await api.about(true)
+assert(checked.update.status === 'available', 'about reports an available published version')
+assert(checked.update.latest === '9.9.9', 'about reports the newest published version')
+delete state.extra.pluginManager
+const unavailable = await api.about(true)
+assert(unavailable.update.status === 'unavailable', 'about reports the update check as unavailable without a plugin manager')
 
 // 1. Style edit on a static element with an explicit data-source hint.
 const styleEdit = {

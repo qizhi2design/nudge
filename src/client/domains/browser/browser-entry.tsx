@@ -259,8 +259,10 @@ function BrowserGuideCard(props) {
 /** One row in a Browser tab's ⋮ menu. Renders nothing for other kinds. */
 function BrowserTabMenuAction(props) {
   var theme = useDshTheme(props.ctx);
+  var pluginConfig = usePluginConfig();
   var t = props.t;
   var tab = props.tab;
+  if (pluginConfig.values.contextMenuTab !== true) return null;
   if (!tab || tab.kind !== BROWSER_KIND) return null;
   var [hover, setHover] = React.useState(false);
 

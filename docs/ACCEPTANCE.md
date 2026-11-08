@@ -10,14 +10,14 @@
 | 测试 | 结果 |
 | --- | --- |
 | `node test/runtime-smoke.mjs` | 257 checks / 0 failures |
-| `node test/client-smoke.mjs` | ok / 47 checks |
+| `node test/client-smoke.mjs` | ok / 53 checks |
 | `node test/client-theme.test.mjs` | 36 checks / 0 failures（body token / 深色翻转 / 系统兜底 / store 通知 / 组件渲染） |
-| `node test/settings-page.test.mjs` | 21 checks / 0 failures（设置 → 轻推：读取 / 编辑 / 保存 / 只读降级） |
+| `node test/settings-page.test.mjs` | 42 checks / 0 failures（设置 → 轻推：语言 / 功能开关 / 右键菜单 / 关于与更新 / 只读） |
 | `node test/workspace-panel.test.mjs` | 99 checks / 0 failures（文件 / 分支 / 提交 / 恢复 + hotReloadDecision） |
 | `node test/clip-annotations.test.mjs` | 39 checks / 0 failures |
 | `node test/source-sync.test.mjs` | 23 groups / 125 assertions ok |
 | `node test/workspace-domain.test.mjs` | 235 assertions / 0 failures（真实临时 git 仓库 + 真实静态服务器 + watcher） |
-| `node test/host-integration.test.mjs` | 47 checks / 0 failures（含 config 桥） |
+| `node test/host-integration.test.mjs` | 65 checks / 0 failures（含产品偏好 config / configUpdate 与 about 版本桥） |
 | `node test/workspace-e2e.test.mjs` | 58 checks / 0 failures（真实 Host 插件 + 真实 git 仓库 + HTTP 预览 + 热更新 revision） |
 
 ## 2. 标注验收
@@ -98,6 +98,18 @@
 - 分行的原因是右侧边栏经常只有 ~500px：单行放 13 个按钮会把地址栏挤到只剩几十像素；两行后地址栏保持可用宽度，所有功能仍然直接可见（不需要二级菜单，避免 Host DOM 无法覆盖 Electron webview 的问题）。
 - 自动刷新待命时，刷新按钮显示 warn 色圆点/待命高亮，两行布局下同样保留。
 - 阈值是纯函数 `toolbarLayout(width)`（`src/client/ui/layout.ts`），`client-smoke` 覆盖 wide / narrow / tiny / 未测量四种情况。
+
+## 6.1 设置页（产品偏好）验收
+
+- **入口**：设置 → 左侧「轻推」（排在「项目目录」之后），与其它插件配置页同级。
+- **通用**：插件界面语言三档（跟随 DSH / 中文 / English）。选择中文或 English 后轻推自身界面文案立即切换（由 Client 配置 store + 内嵌词典实现），无需重载；DSH 外壳文案仍跟随宿主语言。
+- **功能**：标注模式、编辑模式、DOM 树、工作区版本、自动热更新五个开关。
+  - 关闭后工具栏入口立即隐藏（`InspectorToolbar` 根据配置 store 过滤按钮）；
+  - 若会话正停留在被关闭的模式，自动退回浏览模式；已打开的 DOM / 工作区面板自动关闭；
+  - 关闭自动热更新后不再轮询 `watchPoll`，页面不再自动刷新。
+- **右键菜单**：链接（含聊天消息内链接）右键菜单与浏览器标签 ⋮ 菜单的「在轻推中打开」可独立关闭；关闭后 `resolve` 返回空数组 / 菜单项不渲染，重新打开立即恢复。
+- **关于与更新**：显示版本、构建时间（`lib/*.js` 最新 mtime）、git 分支 / 短提交 / 脏状态、运行环境、插件目录；「检查更新」调用 Host `about(check=true)`，本地 `link:` 开发版如实显示「无法在线检查更新」，插件管理器缺失时也明确报告 unavailable。
+- **保存语义**：每次切换即时写入 profile 的 `cordis.patch.yml` 并镜像到 Client store；失败回滚到上一个值并显示错误；「恢复默认」一次写回全部产品默认值；read-only 部署禁用全部控件且不调用 `configUpdate`。
 
 ## 7. 视觉截图
 

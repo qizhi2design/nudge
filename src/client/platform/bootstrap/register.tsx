@@ -11,7 +11,11 @@ function apply(ctx) {
   var slots = ctx.slots;
   var tabs = ctx.sidebarRightTabs;
   var sidebarRight = ctx.sidebarRight;
-  var t = locale.bind(NS);
+  var t = createPluginTranslator(locale.bind(NS));
+
+  // Mirror the product preferences (language, feature switches, context-menu
+  // switches) into the Client store. Defaults apply until this resolves.
+  loadPluginConfig(ctx);
 
   ensureGlobalStyles();
 
@@ -134,6 +138,7 @@ function apply(ctx) {
         target: 'url',
         order: 90,
         resolve: function (target) {
+          if (pluginConfigValues().contextMenuLink !== true) return [];
           var sessionId = target && target.sessionId ? target.sessionId : '';
           var url = target && typeof target.url === 'string' ? target.url : '';
           return [

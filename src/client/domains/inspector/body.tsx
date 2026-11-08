@@ -21,6 +21,8 @@ function NudgeBody(props) {
   if (tab === undefined) {
     tab = ensureTab(tabId, { mode: 'browse' });
   }
+  var pluginConfig = usePluginConfig();
+  var features = pluginConfig.values;
   var carrierRef = React.useRef(null);
   var previousRevisionRef = React.useRef(null);
   var viewportRef = React.useRef(null);
@@ -236,12 +238,23 @@ function NudgeBody(props) {
     }
   }, [tab.url, tabId]);
 
+  // Disabled product features must not leave the surface in a stale state.
+  React.useEffect(function () {
+    if (tab.mode === 'annotate' && features.enableAnnotate === false) patchTab(tabId, { mode: 'browse' });
+    else if (tab.mode === 'edit' && features.enableEdit === false) patchTab(tabId, { mode: 'browse' });
+  }, [tab.mode, features.enableAnnotate, features.enableEdit, tabId]);
+
+  React.useEffect(function () {
+    if (features.enableDomTree === false && domOpen) setDomOpen(false);
+    if (features.enableWorkspaceVersions === false && workspaceOpen) setWorkspaceOpen(false);
+  }, [features.enableDomTree, features.enableWorkspaceVersions, domOpen, workspaceOpen]);
+
   // ----------------------------------------------------------- hot reload
   // Poll the Host watcher (~900ms). The first response only records the
   // baseline revision; later changes reload in browse mode, and defer while the
   // user is annotating/editing by setting `reloadPending` on the tab.
   React.useEffect(function () {
-    if (!sessionId || tab.hotReload === false) return undefined;
+    if (!sessionId || tab.hotReload === false || features.enableHotReload === false) return undefined;
     var remote = createRemote(props.ctx);
     var cancelled = false;
     var reloadTimer = null;
@@ -288,7 +301,7 @@ function NudgeBody(props) {
       previousRevisionRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, sessionId, tab.hotReload, tab.url]);
+  }, [tabId, sessionId, tab.hotReload, tab.url, features.enableHotReload]);
 
   // Apply a deferred reload once the user is back in browse mode.
   React.useEffect(function () {
@@ -662,6 +675,13 @@ function NudgeBody(props) {
       onToggleWorkspace: function () {
         setWorkspaceOpen(!workspaceOpen);
       },
+      features: {
+        annotate: features.enableAnnotate !== false,
+        edit: features.enableEdit !== false,
+        domTree: features.enableDomTree !== false,
+        workspaceVersions: features.enableWorkspaceVersions !== false,
+        hotReload: features.enableHotReload !== false,
+      },
       hotReload: tab.hotReload !== false,
       reloadPending: tab.reloadPending === true,
       onToggleHotReload: function () {
@@ -768,7 +788,7 @@ function NudgeBody(props) {
           )
         : null,
       ),
-      domOpen
+      domOpen && features.enableDomTree !== false
         ? React.createElement(DomTreePanel, {
             t: t,
             theme: theme,
@@ -779,7 +799,7 @@ function NudgeBody(props) {
             },
           })
         : null,
-      workspaceOpen
+      workspaceOpen && features.enableWorkspaceVersions !== false
         ? React.createElement(NudgeWorkspacePanel, {
             ctx: props.ctx,
             t: t,

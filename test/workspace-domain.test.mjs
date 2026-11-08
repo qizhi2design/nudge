@@ -290,7 +290,7 @@ try {
   assert(api !== null && typeof api === 'object', 'apply provides the nudge service')
   assert(mounted.state.provided.name === 'nudge', 'service namespace is nudge')
   assert(mounted.state.typert !== null, 'typert contribution registered')
-  assertEqual(mounted.state.typert.invocations.length, 14, 'fourteen remote invocations registered')
+  assertEqual(mounted.state.typert.invocations.length, 15, 'fifteen remote invocations registered')
   const registeredMethods = mounted.state.typert.invocations.map((entry) => entry.method)
   for (const method of ['workspace', 'gitLog', 'gitSwitch', 'gitRestoreFile', 'gitCommit', 'previewOpen', 'previewStop', 'watchPoll']) {
     assert(registeredMethods.includes(method), 'typert registers workspace method ' + method)

@@ -69,6 +69,13 @@ export interface InspectorToolbarProps {
   hotReload?: boolean
   reloadPending?: boolean
   onToggleHotReload?: () => void
+  features?: {
+    annotate?: boolean
+    edit?: boolean
+    domTree?: boolean
+    workspaceVersions?: boolean
+    hotReload?: boolean
+  }
 }
 
 const WIDE_LAYOUT: ToolbarLayout = { compact: false, narrow: false, tiny: false }
@@ -266,7 +273,9 @@ export function InspectorToolbar({
   hotReload,
   reloadPending,
   onToggleHotReload,
+  features,
 }: InspectorToolbarProps) {
+  const enabled = features || {}
   const [draft, setDraft] = React.useState<string | null>(null)
   const [layout, setLayout] = React.useState<ToolbarLayout>(WIDE_LAYOUT)
   const rootRef = React.useRef<HTMLDivElement>(null)
@@ -276,6 +285,13 @@ export function InspectorToolbar({
   const hotReloadTitle =
     reloadPending === true ? t('hotReload.titlePending') : hotReloadOn ? t('hotReload.titleOn') : t('hotReload.titleOff')
   const pending = reloadPending === true
+  const annotateEnabled = enabled.annotate !== false
+  const editEnabled = enabled.edit !== false
+  const domEnabled = enabled.domTree !== false
+  const workspaceEnabled = enabled.workspaceVersions !== false
+  const hotReloadEnabled = enabled.hotReload !== false
+  const modesEnabled = annotateEnabled || editEnabled
+  const panelsEnabled = domEnabled || workspaceEnabled || hotReloadEnabled
 
   React.useEffect(() => {
     const node = rootRef.current
@@ -322,48 +338,58 @@ export function InspectorToolbar({
         minWidth: 0,
       }}
     >
-      <ModeToggle
-        active={tab.mode === 'annotate'}
-        label={t('toolbar.annotate')}
-        title={t('mode.annotateHint')}
-        theme={theme}
-        icon={<MessageSquarePlus size={13} />}
-        compact
-        onClick={() => toggleMode('annotate')}
-      />
-      <ModeToggle
-        active={tab.mode === 'edit'}
-        label={t('toolbar.edit')}
-        title={t('mode.editHint')}
-        theme={theme}
-        icon={<SlidersHorizontal size={13} />}
-        compact
-        onClick={() => toggleMode('edit')}
-      />
-      <Divider theme={theme} />
-      <IconAction
-        theme={theme}
-        label={t('toolbar.dom')}
-        active={domOpen === true}
-        onClick={() => onToggleDom && onToggleDom()}
-      >
-        <ListTree size={14} />
-      </IconAction>
-      <IconAction
-        theme={theme}
-        label={t('workspace.open')}
-        active={workspaceOpen === true}
-        onClick={() => onToggleWorkspace && onToggleWorkspace()}
-      >
-        <GitBranch size={14} />
-      </IconAction>
-      <HotReloadAction
-        theme={theme}
-        title={hotReloadTitle}
-        active={hotReloadOn}
-        pending={pending}
-        onClick={() => onToggleHotReload && onToggleHotReload()}
-      />
+      {annotateEnabled ? (
+        <ModeToggle
+          active={tab.mode === 'annotate'}
+          label={t('toolbar.annotate')}
+          title={t('mode.annotateHint')}
+          theme={theme}
+          icon={<MessageSquarePlus size={13} />}
+          compact
+          onClick={() => toggleMode('annotate')}
+        />
+      ) : null}
+      {editEnabled ? (
+        <ModeToggle
+          active={tab.mode === 'edit'}
+          label={t('toolbar.edit')}
+          title={t('mode.editHint')}
+          theme={theme}
+          icon={<SlidersHorizontal size={13} />}
+          compact
+          onClick={() => toggleMode('edit')}
+        />
+      ) : null}
+      {modesEnabled && panelsEnabled ? <Divider theme={theme} /> : null}
+      {domEnabled ? (
+        <IconAction
+          theme={theme}
+          label={t('toolbar.dom')}
+          active={domOpen === true}
+          onClick={() => onToggleDom && onToggleDom()}
+        >
+          <ListTree size={14} />
+        </IconAction>
+      ) : null}
+      {workspaceEnabled ? (
+        <IconAction
+          theme={theme}
+          label={t('workspace.open')}
+          active={workspaceOpen === true}
+          onClick={() => onToggleWorkspace && onToggleWorkspace()}
+        >
+          <GitBranch size={14} />
+        </IconAction>
+      ) : null}
+      {hotReloadEnabled ? (
+        <HotReloadAction
+          theme={theme}
+          title={hotReloadTitle}
+          active={hotReloadOn}
+          pending={pending}
+          onClick={() => onToggleHotReload && onToggleHotReload()}
+        />
+      ) : null}
       <Divider theme={theme} />
       <IconAction theme={theme} label={t('toolbar.undo')} disabled={!canUndo} onClick={onUndo}>
         <Undo2 size={14} />
@@ -490,49 +516,61 @@ export function InspectorToolbar({
           </form>
           {layout.narrow ? null : (
             <>
-              <div className="dshnudge-flex dshnudge-items-center dshnudge-gap-1" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <ModeToggle
-                  active={tab.mode === 'annotate'}
-                  label={t('toolbar.annotate')}
-                  title={t('mode.annotateHint')}
+              {modesEnabled ? (
+                <div className="dshnudge-flex dshnudge-items-center dshnudge-gap-1" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  {annotateEnabled ? (
+                    <ModeToggle
+                      active={tab.mode === 'annotate'}
+                      label={t('toolbar.annotate')}
+                      title={t('mode.annotateHint')}
+                      theme={theme}
+                      icon={<MessageSquarePlus size={13} />}
+                      compact={layout.compact}
+                      onClick={() => toggleMode('annotate')}
+                    />
+                  ) : null}
+                  {editEnabled ? (
+                    <ModeToggle
+                      active={tab.mode === 'edit'}
+                      label={t('toolbar.edit')}
+                      title={t('mode.editHint')}
+                      theme={theme}
+                      icon={<SlidersHorizontal size={13} />}
+                      compact={layout.compact}
+                      onClick={() => toggleMode('edit')}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {domEnabled ? (
+                <IconAction
                   theme={theme}
-                  icon={<MessageSquarePlus size={13} />}
-                  compact={layout.compact}
-                  onClick={() => toggleMode('annotate')}
-                />
-                <ModeToggle
-                  active={tab.mode === 'edit'}
-                  label={t('toolbar.edit')}
-                  title={t('mode.editHint')}
+                  label={t('toolbar.dom')}
+                  active={domOpen === true}
+                  onClick={() => onToggleDom && onToggleDom()}
+                >
+                  <ListTree size={14} />
+                </IconAction>
+              ) : null}
+              {workspaceEnabled ? (
+                <IconAction
                   theme={theme}
-                  icon={<SlidersHorizontal size={13} />}
-                  compact={layout.compact}
-                  onClick={() => toggleMode('edit')}
+                  label={t('workspace.open')}
+                  active={workspaceOpen === true}
+                  onClick={() => onToggleWorkspace && onToggleWorkspace()}
+                >
+                  <GitBranch size={14} />
+                </IconAction>
+              ) : null}
+              {hotReloadEnabled ? (
+                <HotReloadAction
+                  theme={theme}
+                  title={hotReloadTitle}
+                  active={hotReloadOn}
+                  pending={pending}
+                  onClick={() => onToggleHotReload && onToggleHotReload()}
                 />
-              </div>
-              <IconAction
-                theme={theme}
-                label={t('toolbar.dom')}
-                active={domOpen === true}
-                onClick={() => onToggleDom && onToggleDom()}
-              >
-                <ListTree size={14} />
-              </IconAction>
-              <IconAction
-                theme={theme}
-                label={t('workspace.open')}
-                active={workspaceOpen === true}
-                onClick={() => onToggleWorkspace && onToggleWorkspace()}
-              >
-                <GitBranch size={14} />
-              </IconAction>
-              <HotReloadAction
-                theme={theme}
-                title={hotReloadTitle}
-                active={hotReloadOn}
-                pending={pending}
-                onClick={() => onToggleHotReload && onToggleHotReload()}
-              />
+              ) : null}
               <Divider theme={theme} />
               <IconAction theme={theme} label={t('toolbar.undo')} disabled={!canUndo} onClick={onUndo}>
                 <Undo2 size={14} />

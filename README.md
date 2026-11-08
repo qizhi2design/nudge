@@ -26,7 +26,7 @@ DSH Desktop 原生插件（插件包 `dsh.nudge`，插件 ID `dsh.nudge`）。�
 - **工作区版本**：工具栏新增「工作区版本」入口，右侧停靠面板列出工作区（`sourceRoot`）里的 HTML 文件并直接用内置 `127.0.0.1` 静态预览服务器打开；识别 git 仓库的当前分支 / 脏文件 / 本地分支 / 单文件历史，支持切换分支（脏工作区要先提交或暂存）、把页面恢复成某个历史 commit 的版本，以及勾选改动文件 + 填写 message 直接 `git commit`。
 - **热更新**：Host 监视工作区文件变化，Client 轮询 revision；浏览模式下页面自动刷新，标注 / 编辑模式改为提示「有更新」，回到浏览模式再刷新。插件自己的样式同步、用户手改、Agent/AI 编辑都会触发同一套刷新。
 - **交给 Agent**：点「插入」把标注变成对话框里的 **clip 批注卡片**（元素截图缩略图 + 标签 + 意见，可编辑 / 删除，带「N 条注释」计数 chip），随用户下一条消息一起发送；已生效的视觉修改与截图路径同样并入这条消息的上下文。
-- **设置面板**：设置 → 左侧边栏「轻推」页直接读写本插件在 profile 里的配置（源码根目录 / URL 前缀 / 扫描上限 / 单文件上限），保存即写回 `cordis.patch.yml` 并由 Loader 生效。
+- **设置面板**：设置 → 左侧「轻推」是产品级偏好页——插件界面语言（跟随 DSH / 中文 / English）、标注 / 编辑 / DOM 树 / 工作区版本 / 自动热更新开关、链接与浏览器标签右键菜单开关，以及「关于与更新」卡片（版本 / 构建时间 / git 状态 / 插件目录 / 检查更新）。改动立即写回 profile 的 `cordis.patch.yml` 并生效。
 - **窄宽度工具栏**：右侧边栏变窄（或打开工作区 / DOM 停靠面板）时，工具栏自动分成两行——第一行只保留后退 / 前进 / 刷新 / 地址栏 / 前往，第二行放标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 外部；地址栏不再被图标挤扁，极窄时再收起前进与「前往」按钮（Enter 仍可提交）。
 - **DSH 原生 UI**：右侧边栏 Tab、设置页、主题 Token、Light/Dark 自适应；不改变 DSH 一级布局。
 - **组件化实现**：宿主 UI 使用 **React + TypeScript + shadcn-style Button（CVA）+ Radix Tooltip + lucide-react + Tailwind（`dshnudge-` 前缀，`components.json` 配置）**；页面注入层保持 Vanilla Shadow DOM，避免污染任意站点。
@@ -96,14 +96,15 @@ DSH Desktop 原生插件（插件包 `dsh.nudge`，插件 ID `dsh.nudge`）。�
 
 ### 设置
 
-设置面板左侧的「轻推」页是这个插件自己的配置页，与「项目目录」「桌宠配置」同级：
+设置 → 左侧「轻推」是产品级偏好页。所有改动通过 Host 的 `configEditor` 立即写回当前 profile 的 `cordis.patch.yml`，不需要手改 YAML：
 
-- **源码根目录**（`sourceRoot`）：页面 URL 映射到的源码目录，留空使用会话工作目录；必须位于工作区内，工作区外的值会被忽略并按 cwd 处理。
-- **URL 前缀**（`urlRoot`）：映射到源码根目录的 URL 前缀，例如 `http://127.0.0.1:4173/`；留空用页面自身 origin。
-- **最多扫描文件数**（`maxScanFiles`，20 – 5000）：URL 无法直接映射时按 token 打分搜索源码的文件数上限。
-- **单文件大小上限**（`maxFileBytes`，16 KB – 16 MB）：单次源码同步可读取的最大文件字节数。
+- **通用**：插件界面语言 —— **跟随 DSH / 中文 / English**。选择中文或 English 只切换轻推自己的界面文案；DSH 外壳（设置导航等）仍跟随宿主语言设置。
+- **功能**：标注模式、编辑模式、DOM 树、工作区版本、自动热更新五个开关。关闭后工具栏对应入口立即隐藏；当前若正停留在被关闭的模式，会自动退回浏览。关闭自动热更新后不再轮询工作区文件。
+- **右键菜单**：链接右键菜单（聊天消息里的链接同理）与浏览器标签 ⋮ 菜单里的「在轻推中打开」开关。
+- **关于与更新**：当前版本、构建时间、源码分支 / 提交 / 脏状态、运行环境、插件目录，以及「检查更新」。本地 `link:` 开发版会如实提示无法在线检查更新；发布版由 DSH 插件管理器负责更新。
+- **恢复默认**：一次写回全部产品偏好的默认值。
 
-字段右侧会标出「已覆盖」——表示该字段已被写进 profile patch；「恢复默认」把四个字段一次性写回 schema 默认值。保存通过 Host 的 `configEditor` 写回 profile 的 `cordis.patch.yml`，并由 Loader 重新应用这一行，所以保存后立即生效、也不需要手动改文件；设置面板右上角的「打开配置文件」打开的是同一个文件。写入会让本插件的 Host 半区重载一次，页面在保存后会重新读取快照再报告结果。
+开关采用即时保存（点击即写入并镜像到 Client 配置 store），工具栏/菜单无需重启插件即可响应；`configUpdate` 失败会回滚到上一个值并显示错误。
 
 ## 架构
 
@@ -190,7 +191,20 @@ watchPoll() ~900ms ── Host fs.watch(revision++) ── Client hotReloadDecis
 
 ## 配置
 
-Host 插件 Config（`cordis.patch.yml` 的 `config`）。同样的四个字段可以在 **设置 → 轻推** 里直接编辑，由 Host 的 `configEditor` 写回 profile patch：
+Host 插件 Config 存储在同一 profile patch 行，**设置 → 轻推** 管理以下产品偏好：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `language` | `auto` | 插件界面语言：`auto`（跟随 DSH）/ `zh` / `en`。 |
+| `enableAnnotate` | `true` | 工具栏「标注」入口。 |
+| `enableEdit` | `true` | 工具栏「编辑」入口。 |
+| `enableDomTree` | `true` | 工具栏「DOM 树」入口。 |
+| `enableWorkspaceVersions` | `true` | 工具栏「工作区版本」入口。 |
+| `enableHotReload` | `true` | 工作区文件监视与页面自动刷新。 |
+| `contextMenuLink` | `true` | 链接（含聊天消息内链接）右键菜单的「在轻推中打开」。 |
+| `contextMenuTab` | `true` | 浏览器标签 ⋮ 菜单的「在轻推中打开」。 |
+
+以下内部映射字段仍可在 `cordis.patch.yml` 里覆盖（设置页不再展示）：
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -199,36 +213,34 @@ Host 插件 Config（`cordis.patch.yml` 的 `config`）。同样的四个字段�
 | `maxScanFiles` | `400` | 无法直接映射时最多扫描的源码文件数。 |
 | `maxFileBytes` | `2000000` | 单个源码文件读取上限。 |
 
-两条路径等价：设置页写入的是同一个 profile patch 行，手工编辑 YAML 后 Loader 同样会重新应用。
-
 `sourceRoot` 同时是**工作区版本面板、HTML 扫描与内置静态预览服务器**的根目录：留空 = 会话 cwd；设成仓库子目录时，git 功能仍可用（面板路径相对 `sourceRoot`，仓库内、`sourceRoot` 之外的改动会被过滤掉）。git 仓库必须位于会话 cwd 之内，否则面板显示仓库不可用。
 
 ## 测试
 
 ```bash
-node test/client-smoke.mjs            # Client bundle 工厂 + 所有注册项 + 响应式工具栏阈值（47 checks）
+node test/client-smoke.mjs            # Client bundle 工厂 + 注册项 + 工具栏阈值 + 配置 store（53 checks）
 node test/client-theme.test.mjs       # 宿主主题桥：body token / 深色翻转 / 系统兜底 / store 通知 / 组件渲染（36 checks）
-node test/settings-page.test.mjs      # 设置 → 轻推 页：读取 / 编辑 / 保存 / 只读降级（21 checks）
+node test/settings-page.test.mjs      # 设置 → 轻推：语言 / 功能开关 / 右键菜单 / 关于与更新 / 只读（42 checks）
 node test/workspace-panel.test.mjs    # 工作区版本面板：文件 / 分支 / 提交 / 恢复 + hotReloadDecision（99 checks）
 node test/clip-annotations.test.mjs   # clip 草稿存储 + 占位/恢复 + 发送上下文（39 checks）
 node test/runtime-smoke.mjs           # 页面运行时 API/行为（257 checks）
 node test/source-sync.test.mjs        # 源码持久化（23 groups / 125 assertions）
 node test/workspace-domain.test.mjs   # 真实临时 git 仓库：扫描 / 分支 / 提交 / 恢复 / 预览服务器 / watcher（235 assertions）
-node test/host-integration.test.mjs   # 真实 Host 插件 + 真实临时工作区 + 配置桥（47 checks）
+node test/host-integration.test.mjs   # 真实 Host 插件 + 真实临时工作区 + 配置/关于桥（65 checks）
 node test/workspace-e2e.test.mjs      # 端到端：workspace → previewOpen → 改文件 → watchPoll → commit → 切分支 / 恢复 / 只读（58 checks）
 ```
 
 最近一次结果：
 
-- `client-smoke`：ok / 47 checks
+- `client-smoke`：ok / 53 checks
 - `client-theme`：36 checks / 0 failures
-- `settings-page`：21 checks / 0 failures
+- `settings-page`：42 checks / 0 failures
 - `workspace-panel`：99 checks / 0 failures
 - `clip-annotations`：39 checks / 0 failures
 - `runtime-smoke`：257 checks / 0 failures
 - `source-sync`：23 groups / 125 assertions，exit 0
 - `workspace-domain`：235 assertions / 0 failures（真实 git 仓库 + 真实静态服务器）
-- `host-integration`：ok / 47 checks（含配置桥 config / configUpdate、style / text / attr / CSS / 重置 / 只读 / 截图 PNG）
+- `host-integration`：ok / 65 checks（含产品偏好 config / configUpdate、about 版本信息、style / text / attr / CSS / 重置 / 只读 / 截图 PNG）
 - `workspace-e2e`：58 checks / 0 failures（真实 Host 插件 + 真实 git 仓库 + 真实 HTTP 预览 + watcher revision）
 
 > 真实 Chromium 的 CDP 集成与 Light / Dark 截图验收不在本仓库运行：它们在同级 `../validation/` 仓库执行
@@ -266,6 +278,8 @@ node test/workspace-e2e.test.mjs      # 端到端：workspace → previewOpen �
 - 嵌套在 `sourceRoot` 内部、且 `sourceRoot` 本身不在任何仓库里的独立子仓库不会被自动发现（只按 `git rev-parse` 探测，不做 `.git` 递归扫描）。
 - watcher 的 stat 轮询兜底已实现但未做故障注入测试（macOS 上走递归 `fs.watch`，Linux 递归 watch 依 Node 版本可能退化到轮询）。
 - Web（非 Desktop）载体只支持同源 iframe 页面；DSH Desktop 的 Electron webview 是主要目标。
+- 插件界面语言只覆盖轻推自己的界面文案；DSH 外壳（设置导航、对话界面等）仍跟随宿主语言设置。
+- 「检查更新」对本地 `link:` 开发版会如实报告不可在线检查；发布版由 DSH 插件管理器负责更新。
 - 极窄的停靠宽度下建议把 Browser Workspace 展开 / 全屏使用。
 
 ## 构建

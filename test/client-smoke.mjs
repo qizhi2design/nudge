@@ -106,6 +106,18 @@ assert(
   JSON.stringify(workspaceTestHook.toolbarLayout(Number.NaN)) === JSON.stringify({ compact: false, narrow: false, tiny: false }),
   'toolbar layout falls back to wide before the first measurement',
 )
+assert(typeof workspaceTestHook.pluginConfigDefaults === 'function', 'plugin config defaults are bundled')
+const pluginDefaults = workspaceTestHook.pluginConfigDefaults()
+assert(pluginDefaults.language === 'auto', 'plugin language defaults to auto')
+assert(pluginDefaults.enableAnnotate === true && pluginDefaults.enableHotReload === true, 'feature switches default to enabled')
+assert(workspaceTestHook.formatPluginText('检查更新 {version}', { version: '0.2.0' }) === '检查更新 0.2.0', 'locale placeholders interpolate')
+assert(
+  workspaceTestHook.pluginTranslate((key) => 'host:' + key, 'settings.title') === 'host:settings.title',
+  'auto language falls back to the DSH translator',
+)
+workspaceTestHook.setPluginConfig({ language: 'zh' }, null)
+assert(workspaceTestHook.pluginTranslate((key) => 'host:' + key, 'settings.title') === '轻推', 'explicit zh uses the embedded dictionary')
+workspaceTestHook.setPluginConfig({ language: 'auto' }, null)
 assert(source.includes('data-toolbar-secondary'), 'bundle ships the expandable secondary toolbar row')
 assert(source.includes('data-toolbar-primary'), 'bundle ships the primary toolbar row marker')
 assert(source.includes('data-dsh-nudge-workspace-panel'), 'bundle ships the workspace panel DOM contract')
