@@ -3,3 +3,7 @@ export type { InspectorMode, InspectorTab, InspectorTheme, InspectorToolbarProps
 export { TOOLBAR_WIDTH, toolbarLayout } from './layout'
 export type { ToolbarLayout } from './layout'
 export { NudgeIcons } from './icons'
+export { Keycap, ShortcutKeys, keycapModel, keycapKeyLabel } from './components/kbd'
+export type { KeycapPart, KeycapIcon, ShortcutBinding, ShortcutPlatform } from './components/kbd'
+export { ModeHintContent, ShortcutSheet } from './components/shortcut-sheet'
+export type { ShortcutSheetRow } from './components/shortcut-sheet'

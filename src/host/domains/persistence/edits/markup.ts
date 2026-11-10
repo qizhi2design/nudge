@@ -5,8 +5,8 @@
  * Pure functions only: no I/O, no top-level side effects.
  */
 
-import { URL_ATTRIBUTES } from '../constants.js'
-import { locateElement } from '../html/locate.js'
+import { URL_ATTRIBUTES, VOID_ELEMENTS } from '../constants.js'
+import { locateElement, locateElementDetailed } from '../html/locate.js'
 import { tokenizeHtml, textNodeRanges } from '../html/tokenizer.js'
 import { escapeRegExp } from '../shared/paths.js'
 import { diffText, decodeEntities, decodeEntitiesWithMap, escapeHtmlText, escapeAttributeValue, stripMarkup, normalizeWhitespaceText, compactText } from '../shared/text.js'
@@ -14,8 +14,9 @@ import { diffText, decodeEntities, decodeEntitiesWithMap, escapeHtmlText, escape
 export function applyMarkupTextEdit(content, edit) {
   const textAfter = typeof edit.textAfter === 'string' ? edit.textAfter : typeof edit.after === 'string' ? edit.after : null
   if (textAfter === null) return { ok: false, reason: 'invalid-edit' }
-  const element = locateElement(content, edit)
-  if (!element) return { ok: false, reason: 'unresolved-element' }
+  const located = locateElementDetailed(content, edit)
+  if (!located.range) return { ok: false, reason: located.reason || 'unresolved-element' }
+  const element = located.range
 
   const innerStart = element.innerStart
   const innerEnd = element.innerEnd
@@ -163,8 +164,9 @@ export function applyMarkupAttrEdit(content, edit) {
   if (!removal && typeof edit.attrAfter !== 'string') return { ok: false, reason: 'invalid-edit' }
   if (!removal && URL_ATTRIBUTES.has(lowerName) && isScriptUrl(edit.attrAfter)) return { ok: false, reason: 'unsafe-attribute' }
 
-  const element = locateElement(content, edit)
-  if (!element) return { ok: false, reason: 'unresolved-element' }
+  const located = locateElementDetailed(content, edit)
+  if (!located.range) return { ok: false, reason: located.reason || 'unresolved-element' }
+  const element = located.range
   const tag = element.tag
   const existing = (tag.attrs || []).find((attr) => attr.name === lowerName)
 
@@ -224,4 +226,242 @@ export function applyMarkupAttrEdit(content, edit) {
 export function isScriptUrl(value) {
   const text = String(value).replace(/[\u0000-\u0020]+/g, '').toLowerCase()
   return text.startsWith('javascript:') || text.startsWith('vbscript:') || text.startsWith('data:text/html') || text.startsWith('data:image/svg+xml')
+}
+// --------------------------------------------------------- structure edits
+
+/** Elements a structural edit must never remove or move. */
+const STRUCTURE_PROTECTED_TAGS = new Set(['html', 'head', 'body'])
+
+/** Destination containers whose inner text is not markup. */
+const STRUCTURE_UNSUPPORTED_PARENT_TAGS = new Set(['html', 'head', 'script', 'style', 'textarea', 'title'])
+
+function structureExtent(range) {
+  const end = typeof range.closeEnd === 'number' ? range.closeEnd : range.openEnd
+  return { start: range.openStart, end }
+}
+
+function lineStartAt(content, index) {
+  const found = content.lastIndexOf('\n', Math.max(0, index - 1))
+  return found < 0 ? 0 : found + 1
+}
+
+function lineEndAt(content, index) {
+  const found = content.indexOf('\n', index)
+  return found < 0 ? content.length : found
+}
+
+/** Leading whitespace of the line index sits on, '' when the line is not blank. */
+function indentAt(content, index) {
+  const start = lineStartAt(content, index)
+  const prefix = content.slice(start, index)
+  return /^[ \t]*$/.test(prefix) ? prefix : ''
+}
+
+/**
+ * Remove [start,end) from content. When the removed element occupied its own
+ * line(s) (only whitespace before and after it) the whole line is dropped so no
+ * blank gap is left behind; an inline removal keeps one separating space when
+ * both neighbours carry one.
+ */
+function cutWithLineCleanup(content, start, end) {
+  const startLine = lineStartAt(content, start)
+  const endLine = lineEndAt(content, end)
+  const prefixBlank = /^[ \t\r]*$/.test(content.slice(startLine, start))
+  const suffixBlank = /^[ \t\r]*$/.test(content.slice(end, endLine))
+  if (prefixBlank && suffixBlank) {
+    const removeEnd = endLine < content.length ? endLine + 1 : endLine
+    return {
+      content: content.slice(0, startLine) + content.slice(removeEnd),
+      start: startLine,
+      end: removeEnd,
+      lineIndex: startLine,
+    }
+  }
+  let trimStart = start
+  while (trimStart > startLine && /[ \t]/.test(content[trimStart - 1])) trimStart -= 1
+  let trimEnd = end
+  while (trimEnd < endLine && /[ \t]/.test(content[trimEnd])) trimEnd += 1
+  let cutStart = start
+  let cutEnd = end
+  // Preserve the visible spacing around the removed element: keep one space
+  // when both neighbours had one, otherwise leave the existing space alone.
+  if (trimStart < start && trimEnd > end) {
+    cutStart = trimStart + 1
+    cutEnd = trimEnd
+  }
+  return {
+    content: content.slice(0, cutStart) + content.slice(cutEnd),
+    start: cutStart,
+    end: cutEnd,
+    lineIndex: cutStart,
+  }
+}
+
+/** Parent tag index for every opening tag, mirroring the tokenizer's nesting. */
+function elementParentIndexes(tags) {
+  const parents = new Array(tags.length).fill(-1)
+  const stack = []
+  for (let index = 0; index < tags.length; index += 1) {
+    const tag = tags[index]
+    if (tag.closing) {
+      for (let cursor = stack.length - 1; cursor >= 0; cursor -= 1) {
+        if (tags[stack[cursor]].name === tag.name) {
+          stack.length = cursor
+          break
+        }
+      }
+      continue
+    }
+    parents[index] = stack.length > 0 ? stack[stack.length - 1] : -1
+    if (!tag.selfClosing && !VOID_ELEMENTS.has(tag.name)) stack.push(index)
+  }
+  return parents
+}
+
+function nextSiblingIndexOf(tags, parents, index) {
+  const parent = parents[index]
+  for (let cursor = index + 1; cursor < tags.length; cursor += 1) {
+    if (parents[cursor] !== parent) continue
+    if (tags[cursor].closing) continue
+    return cursor
+  }
+  return -1
+}
+
+/** Re-indent the continuation lines of a moved element snippet. */
+function reindentSnippet(snippet, fromIndent, toIndent) {
+  if (snippet.indexOf('\n') < 0 || fromIndent === toIndent) return snippet
+  const lines = snippet.split('\n')
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (line.trim() === '') {
+      lines[index] = ''
+      continue
+    }
+    if (fromIndent !== '' && line.indexOf(fromIndent) === 0) lines[index] = toIndent + line.slice(fromIndent.length)
+    else if (fromIndent === '') lines[index] = toIndent + line
+  }
+  return lines.join('\n')
+}
+
+/** Delete one element (with its subtree) from a markup file. */
+export function applyMarkupRemoveEdit(content, edit) {
+  const located = locateElementDetailed(content, edit)
+  if (!located.range) return { ok: false, reason: located.reason || 'unresolved-element' }
+  const range = located.range
+  const tag = range.tag && range.tag.name ? range.tag.name : ''
+  if (STRUCTURE_PROTECTED_TAGS.has(tag)) return { ok: false, reason: 'protected-element' }
+  const extent = structureExtent(range)
+  const cut = cutWithLineCleanup(content, extent.start, extent.end)
+  return { ok: true, content: cut.content, changed: cut.content !== content, lineIndex: cut.lineIndex }
+}
+
+/**
+ * Move one element inside the same markup file: cut its source extent and
+ * insert it before the anchor sibling (or append it to the destination parent
+ * when no anchor is given). Both endpoints must resolve uniquely, otherwise
+ * nothing is written.
+ */
+export function applyMarkupMoveEdit(content, edit) {
+  const sourceLocated = locateElementDetailed(content, edit)
+  if (!sourceLocated.range) return { ok: false, reason: sourceLocated.reason || 'unresolved-element' }
+  const sourceRange = sourceLocated.range
+  const sourceTag = sourceRange.tag && sourceRange.tag.name ? sourceRange.tag.name : ''
+  if (STRUCTURE_PROTECTED_TAGS.has(sourceTag)) return { ok: false, reason: 'protected-element' }
+
+  const { tags } = tokenizeHtml(content)
+  const parents = elementParentIndexes(tags)
+  const sourceIndex = sourceRange.tagIndex
+  const sourceParentIndex = parents[sourceIndex]
+
+  const parentSpec = {
+    selector: typeof edit.targetParentSelector === 'string' ? edit.targetParentSelector : '',
+    outerHTML: typeof edit.targetParentOuterHTML === 'string' ? edit.targetParentOuterHTML : '',
+    textBefore: typeof edit.targetParentTextBefore === 'string' ? edit.targetParentTextBefore : '',
+  }
+  const parentRange = locateElement(content, parentSpec)
+  if (!parentRange) return { ok: false, reason: 'unresolved-target-parent' }
+  const parentTag = parentRange.tag && parentRange.tag.name ? parentRange.tag.name : ''
+  if (parentTag === 'html') return { ok: false, reason: 'protected-element' }
+  if (STRUCTURE_UNSUPPORTED_PARENT_TAGS.has(parentTag)) return { ok: false, reason: 'unsupported-target-parent' }
+  if (typeof parentRange.closeStart !== 'number') return { ok: false, reason: 'unsupported-target-parent' }
+  const parentIndex = parentRange.tagIndex
+
+  // The destination must not be the moved element or one of its descendants.
+  if (parentIndex === sourceIndex) return { ok: false, reason: 'invalid-move-target' }
+  for (let cursor = parentIndex; cursor >= 0; cursor = parents[cursor]) {
+    if (cursor === sourceIndex) return { ok: false, reason: 'invalid-move-target' }
+  }
+
+  const beforeSelector = typeof edit.beforeSelector === 'string' ? edit.beforeSelector.trim() : ''
+  let anchorRange = null
+  let anchorIndex = -1
+  if (beforeSelector !== '') {
+    const anchorSpec = {
+      selector: beforeSelector,
+      outerHTML: typeof edit.beforeOuterHTML === 'string' ? edit.beforeOuterHTML : '',
+      textBefore: typeof edit.beforeTextBefore === 'string' ? edit.beforeTextBefore : '',
+    }
+    anchorRange = locateElement(content, anchorSpec)
+    if (!anchorRange) return { ok: false, reason: 'unresolved-target-anchor' }
+    anchorIndex = anchorRange.tagIndex
+    if (anchorIndex === sourceIndex) return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
+    if (parents[anchorIndex] !== parentIndex) return { ok: false, reason: 'invalid-move-target' }
+  } else if (sourceParentIndex === parentIndex && nextSiblingIndexOf(tags, parents, sourceIndex) < 0) {
+    return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
+  }
+  if (anchorIndex >= 0 && sourceParentIndex === parentIndex && nextSiblingIndexOf(tags, parents, sourceIndex) === anchorIndex) {
+    return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
+  }
+
+  const extent = structureExtent(sourceRange)
+  const snippet = content.slice(extent.start, extent.end)
+  const sourceIndent = indentAt(content, extent.start)
+
+  let destIndent = ''
+  let insertAt = 0
+  let insertionText = ''
+  if (anchorRange) {
+    // Insert before the anchor sibling, on the anchor's own line.
+    destIndent = indentAt(content, anchorRange.openStart)
+    const anchorLineStart = lineStartAt(content, anchorRange.openStart)
+    const anchorLinePrefix = content.slice(anchorLineStart, anchorRange.openStart)
+    const reindented = reindentSnippet(snippet, sourceIndent, destIndent)
+    if (/^[ \t]*$/.test(anchorLinePrefix)) {
+      insertAt = anchorLineStart
+      insertionText = destIndent + reindented + '\n'
+    } else {
+      insertAt = anchorRange.openStart
+      insertionText = reindented
+    }
+  } else {
+    // Append inside the destination container, before its closing tag.
+    let firstChild = -1
+    for (let cursor = 0; cursor < tags.length; cursor += 1) {
+      if (parents[cursor] !== parentIndex) continue
+      if (tags[cursor].closing) continue
+      firstChild = cursor
+      break
+    }
+    const closeLineStart = lineStartAt(content, parentRange.closeStart)
+    const closeIndent = indentAt(content, parentRange.closeStart)
+    const closeLinePrefix = content.slice(closeLineStart, parentRange.closeStart)
+    destIndent = firstChild >= 0 ? indentAt(content, tags[firstChild].start) : closeIndent + '  '
+    const reindented = reindentSnippet(snippet, sourceIndent, destIndent)
+    if (/^[ \t]*$/.test(closeLinePrefix)) {
+      insertAt = closeLineStart
+      insertionText = destIndent + reindented + '\n'
+    } else {
+      insertAt = parentRange.closeStart
+      insertionText = reindented
+    }
+  }
+
+  const cut = cutWithLineCleanup(content, extent.start, extent.end)
+  let mapped = insertAt
+  if (mapped >= cut.end) mapped = insertAt - (cut.end - cut.start)
+  else if (mapped > cut.start) mapped = cut.start
+  const next = cut.content.slice(0, mapped) + insertionText + cut.content.slice(mapped)
+  if (next === content) return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
+  return { ok: true, content: next, changed: true, lineIndex: Math.min(cut.lineIndex, mapped) }
 }

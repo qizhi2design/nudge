@@ -24,6 +24,7 @@ var SETTINGS_FEATURE_ROWS = [
   { key: 'enableEdit', label: 'settings.featureEdit', hint: 'settings.featureEditHint' },
   { key: 'enableDomTree', label: 'settings.featureDomTree', hint: 'settings.featureDomTreeHint' },
   { key: 'enableWorkspaceVersions', label: 'settings.featureWorkspaceVersions', hint: 'settings.featureWorkspaceVersionsHint' },
+  { key: 'enableFloatingComposer', label: 'settings.featureFloatingComposer', hint: 'settings.featureFloatingComposerHint' },
   { key: 'enableHotReload', label: 'settings.featureHotReload', hint: 'settings.featureHotReloadHint' },
 ]
 

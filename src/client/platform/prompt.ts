@@ -47,6 +47,14 @@ function buildAgentPrompt(tab, annotations, ops) {
         line += ' 文本: ' + JSON.stringify(truncate(op.before, 80)) + ' → ' + JSON.stringify(truncate(op.after, 120));
       } else if (op.kind === 'attr') {
         line += ' 属性 `' + op.attrName + '`: ' + JSON.stringify(op.before) + ' → ' + JSON.stringify(op.after);
+      } else if (op.kind === 'remove') {
+        line += ' 移除元素（含子树）';
+      } else if (op.kind === 'move') {
+        line +=
+          ' 移动元素：目标父节点 `' +
+          (op.targetParentSelector || '') +
+          '`，位置 ' +
+          (op.beforeSelector ? '`' + op.beforeSelector + '` 之前' : '末尾追加');
       }
       line += '（' + (op.syncStatus === 'synced' ? '源码已同步' : op.syncStatus === 'failed' ? '源码同步失败' : '当前仅运行时预览') + '）';
       lines.push(line);
@@ -106,6 +114,14 @@ function buildClipContext(clips, ops) {
         line += ' 文本: ' + JSON.stringify(truncate(op.before, 80)) + ' → ' + JSON.stringify(truncate(op.after, 120));
       } else if (op.kind === 'attr') {
         line += ' 属性 `' + op.attrName + '`: ' + JSON.stringify(op.before) + ' → ' + JSON.stringify(op.after);
+      } else if (op.kind === 'remove') {
+        line += ' 移除元素（含子树）';
+      } else if (op.kind === 'move') {
+        line +=
+          ' 移动元素：目标父节点 `' +
+          (op.targetParentSelector || '') +
+          '`，位置 ' +
+          (op.beforeSelector ? '`' + op.beforeSelector + '` 之前' : '末尾追加');
       }
       line += '（' + (op.syncStatus === 'synced' ? '源码已同步' : op.syncStatus === 'failed' ? '源码同步失败' : '当前仅运行时预览') + '）';
       lines.push(line);

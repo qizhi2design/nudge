@@ -116,15 +116,65 @@
 	function applyAttr(selector, name, value) {
 		return destroyed ? { ok: !1, before: null, after: null, reason: 'destroyed' } : applyAttrTo(resolveSelector(selector), name, value)
 	}
+	function resolveStructureElement(selector, path) {
+		var element = null
+		try {
+			element = typeof selector == 'string' && selector !== '' ? resolveSelector(selector) : null
+		} catch {
+			element = null
+		}
+		return (!element && Array.isArray(path) && (element = resolvePath(path)), element && element.nodeType === 1 && !isOwnNode(element) ? element : null)
+	}
+	function applyRemoveTo(element) {
+		if (!element) return { ok: !1, before: null, after: null, reason: 'not-found' }
+		var tag = tagLower(element)
+		if (tag === 'html' || tag === 'head' || tag === 'body') return { ok: !1, before: null, after: null, reason: 'protected-element' }
+		try {
+			if (!element.parentNode) return { ok: !1, before: null, after: null, reason: 'not-found' }
+			element.parentNode.removeChild(element)
+		} catch {
+			return { ok: !1, before: null, after: null, reason: 'write-failed' }
+		}
+		return { ok: !0, before: null, after: null, applied: !0, removed: !0 }
+	}
+	function applyMoveTo(element, parent, before) {
+		if (!element || !parent || parent.nodeType !== 1) return { ok: !1, before: null, after: null, reason: 'not-found' }
+		var tag = tagLower(element)
+		if (tag === 'html' || tag === 'head' || tag === 'body') return { ok: !1, before: null, after: null, reason: 'protected-element' }
+		var parentTag = tagLower(parent)
+		if (parentTag === 'html' || parentTag === 'head') return { ok: !1, before: null, after: null, reason: 'protected-element' }
+		if (STRUCTURE_NO_CHILDREN[parentTag]) return { ok: !1, before: null, after: null, reason: 'unsupported-target-parent' }
+		for (var cursor = parent, guard = 0; cursor && guard < 200; cursor = cursor.parentNode, guard += 1) if (cursor === element) return { ok: !1, before: null, after: null, reason: 'invalid-move-target' }
+		if (before && before.parentNode !== parent) return { ok: !1, before: null, after: null, reason: 'invalid-move-target' }
+		try {
+			parent.insertBefore(element, before || null)
+		} catch {
+			return { ok: !1, before: null, after: null, reason: 'write-failed' }
+		}
+		return { ok: !0, before: null, after: null, applied: !0, moved: !0 }
+	}
 	function reapply(edits) {
 		for (var list = Array.isArray(edits) ? edits : [], applied = 0, failed = 0, results = [], index = 0; index < list.length; index += 1) {
 			var edit = list[index] || {},
-				element = resolveEditElement(edit),
-				outcome = null,
-				kind = String(edit.kind || '')
-			;(kind === 'style' ? (outcome = applyStyleTo(element, edit.property, edit.value, edit.important !== !1)) : kind === 'text' ? (outcome = applyTextTo(element, edit.value)) : kind === 'attr' ? (outcome = applyAttrTo(element, edit.attrName || edit.name, edit.value)) : (outcome = { ok: !1, reason: 'unknown-kind' }),
-				outcome && outcome.ok ? (applied += 1) : (failed += 1),
-				results.push({ index, kind, ok: !!(outcome && outcome.ok), reason: outcome && outcome.reason ? outcome.reason : void 0 }))
+				kind = String(edit.kind || ''),
+				outcome = null
+			if (kind === 'remove') outcome = applyRemoveTo(resolveStructureElement(edit.selector, edit.path))
+			else if (kind === 'move') {
+				var parent = resolveStructureElement(edit.targetParentSelector, edit.targetParentPath),
+					anchor = edit.beforeSelector || edit.beforePath ? resolveStructureElement(edit.beforeSelector, edit.beforePath) : null
+				outcome = applyMoveTo(resolveStructureElement(edit.selector, edit.path), parent, anchor)
+			} else {
+				var element = resolveEditElement(edit)
+				outcome =
+					kind === 'style'
+						? applyStyleTo(element, edit.property, edit.value, edit.important !== !1)
+						: kind === 'text'
+							? applyTextTo(element, edit.value)
+							: kind === 'attr'
+								? applyAttrTo(element, edit.attrName || edit.name, edit.value)
+								: { ok: !1, reason: 'unknown-kind' }
+			}
+			;(outcome && outcome.ok ? (applied += 1) : (failed += 1), results.push({ index, kind, ok: !!(outcome && outcome.ok), reason: outcome && outcome.reason ? outcome.reason : void 0 }))
 		}
 		return { applied, failed, results }
 	}

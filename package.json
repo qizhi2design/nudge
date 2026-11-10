@@ -80,6 +80,6 @@
     "build:host": "node scripts/build-host.mjs",
     "build:client": "node scripts/build-client.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node test/client-smoke.mjs && node test/client-theme.test.mjs && node test/settings-page.test.mjs && node test/workspace-panel.test.mjs && node test/clip-annotations.test.mjs && node test/runtime-smoke.mjs && node test/source-sync.test.mjs && node test/workspace-domain.test.mjs && node test/host-integration.test.mjs && node test/workspace-e2e.test.mjs"
+    "test": "node test/client-smoke.mjs && node test/floating-composer.test.mjs && node test/host-bar-parity.test.mjs && node test/client-theme.test.mjs && node test/settings-page.test.mjs && node test/workspace-panel.test.mjs && node test/clip-annotations.test.mjs && node test/runtime-smoke.mjs && node test/source-sync.test.mjs && node test/workspace-domain.test.mjs && node test/host-integration.test.mjs && node test/workspace-e2e.test.mjs"
   }
 }

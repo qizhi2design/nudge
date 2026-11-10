@@ -94,7 +94,8 @@
     "ancestors": "祖先",
     "descendants": "子元素",
     "noDirectText": "该元素没有可直接编辑的文本节点",
-    "noDescendants": "没有子元素"
+    "noDescendants": "没有子元素",
+    "structureUndoUnavailable": "移除 / 移动元素无法在页内撤销；刷新页面可恢复 DOM。"
   },
   "annotation": {
     "popoverTitle": "添加标注",
@@ -143,7 +144,10 @@
     "statusShowMarkers": "显示标记",
     "statusDiscard": "丢弃批注",
     "statusDiscardArmed": "再次点击丢弃全部批注",
-    "statusMoveToolbar": "移动工具栏"
+    "statusMoveToolbar": "移动工具栏",
+    "designDelete": "删除元素",
+    "designDeleteHint": "删除该元素及其子树",
+    "designMoveHint": "拖动调整位置或层级"
   },
   "composer": {
     "chip": "标注 ×{n}",
@@ -152,7 +156,24 @@
   },
   "shortcut": {
     "open": "打开轻推",
-    "noSession": "请先打开一个会话"
+    "noSession": "请先打开一个会话",
+    "annotate": "轻推：切换标注模式",
+    "edit": "轻推：切换编辑模式",
+    "domTree": "轻推：切换 DOM 树",
+    "workspace": "轻推：切换工作区版本",
+    "holdSpace": "轻推：按住空格键临时操作网页",
+    "featureOff": "该功能已在轻推设置中关闭",
+    "help": "键盘快捷键",
+    "helpTitle": "轻推快捷键",
+    "helpHint": "可在 DSH 的快捷键面板中修改",
+    "unbound": "未设置",
+    "pageLocal": "页面内",
+    "hintAnnotate": "点击任意位置添加批注，拖动可框选区域",
+    "hintEdit": "点击元素调整样式",
+    "exitMode": "退出标注 / 编辑模式",
+    "switchMode": "切换标注与编辑模式",
+    "hintSpaceBefore": "按住",
+    "hintSpaceAfter": "临时操作网页"
   },
   "address": {
     "empty": "请输入地址。",
@@ -163,6 +184,9 @@
     "loadFailed": "页面加载失败；请刷新重试。"
   },
   "source": {
+    "reasonUnresolved": "找不到元素",
+    "reasonAmbiguous": "元素不唯一，无法确定要改哪一个",
+    "reasonPathMismatch": "页面结构已变化，定位失败",
     "noMapping": "该页面没有对应的 Workspace 源文件，修改仅在本页预览。",
     "notWritable": "当前会话的授权不允许写入工作区，修改保留为预览状态。",
     "failed": "源码同步失败：{message}",
@@ -174,9 +198,9 @@
     "openInspectorHint": "在轻推中打开这个页面",
     "chooseAction": "选择打开方式",
     "openBrowser": "打开浏览器",
-    "openBrowserHint": "像平常一样浏览这个页面",
-    "activateInspector": "激活轻推",
-    "activateInspectorHint": "点击元素、添加标注或实时修改样式"
+    "openBrowserHint": "像普通浏览器一样浏览这个网页",
+    "activateInspector": "在轻推中打开",
+    "activateInspectorHint": "标注元素、实时调整样式，交给 Agent"
   },
   "link": {
     "openInspector": "在轻推中打开"
@@ -331,6 +355,12 @@
     "loadFailed": "读取配置失败：{message}",
     "saveFailed": "保存失败：{message}",
     "readOnly": "当前部署不允许从设置面板写入 profile 配置；下面显示的是生效值，可只读查看。",
-    "reloadHint": "如果插件刚更新过，重启一次应用或在本页关闭再打开 dsh.nudge 即可生效。"
+    "reloadHint": "如果插件刚更新过，重启一次应用或在本页关闭再打开 dsh.nudge 即可生效。",
+    "featureFloatingComposer": "全屏悬浮输入框",
+    "featureFloatingComposerHint": "右侧面板全屏时，把对话输入框悬浮在面板上方，方便边标注边发消息。"
+  },
+  "floating": {
+    "collapse": "收缩为悬浮按钮",
+    "expand": "展开对话"
   }
 }

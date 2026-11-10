@@ -26,10 +26,17 @@
  * deps = { fs, cwd, sourceRoot, urlRoot, page, edits, policy, maxScanFiles, maxFileBytes }
  *
  * EditRecord = {
- *   id, kind: 'style'|'text'|'attr', selector, path?, property?, value?,
+ *   id, kind: 'style'|'text'|'attr'|'remove'|'move', selector, path?, property?, value?,
  *   before?, after?, textBefore?, textAfter?, attrName?, attrBefore?, attrAfter?,
  *   outerHTML?, textSnippet?, sourceHints?: { file?, line?, styleHref?, styleSelector? },
+ *   targetParentSelector?, targetParentOuterHTML?, targetParentTextBefore?,
+ *   beforeSelector?, beforeOuterHTML?, beforeTextBefore?,
  * }
+ *
+ * remove deletes the located element's whole extent; move cuts it from the same
+ * markup file and re-inserts it before `beforeSelector` (or appends it to
+ * `targetParentSelector` when that is null). Both endpoints must resolve
+ * uniquely; otherwise the edit reports preview/unresolved and writes nothing.
  *
  * Result = {
  *   results: [{ id, status: 'synced'|'preview'|'failed', file?, line?, strategy?, reason?, message? }],

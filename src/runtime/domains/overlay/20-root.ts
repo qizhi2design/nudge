@@ -114,6 +114,24 @@
 						padding: '0px',
 						zIndex: '2'
 					})),
+					(parts.drop = makePart('div', 'drop', {
+						position: 'fixed',
+						left: '0px',
+						top: '0px',
+						width: '0px',
+						height: '0px',
+						zIndex: '6',
+						pointerEvents: 'none',
+						display: 'none',
+						boxSizing: 'border-box',
+						borderStyle: 'none',
+						borderWidth: '0px',
+						borderColor: annotationAccentColor(),
+						borderRadius: '4px',
+						background: 'transparent',
+						margin: '0px',
+						padding: '0px'
+					})),
 					(parts.badges = {}),
 					(parts.regions = {}))
 				;(parts.cursor = doc.createElement('div'))
@@ -163,7 +181,7 @@
 					border: '1px solid ' + theme.border,
 					background: theme.panelBg,
 					color: theme.text,
-					boxShadow: theme.isDark ? '0 6px 18px rgba(0,0,0,0.42)' : '0 4px 14px rgba(20,30,50,0.14)',
+					boxShadow: effectiveDark() ? '0 6px 18px rgba(0,0,0,0.42)' : '0 4px 14px rgba(20,30,50,0.14)',
 					font: '11px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 					textAlign: 'left',
 					margin: '0px'

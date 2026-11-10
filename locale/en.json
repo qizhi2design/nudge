@@ -94,7 +94,8 @@
     "ancestors": "Ancestors",
     "descendants": "Children",
     "noDirectText": "This element has no directly editable text node",
-    "noDescendants": "No child elements"
+    "noDescendants": "No child elements",
+    "structureUndoUnavailable": "Remove / move edits cannot be undone in the page; reload to restore the DOM."
   },
   "annotation": {
     "popoverTitle": "Add annotation",
@@ -143,7 +144,10 @@
     "statusShowMarkers": "Show markers",
     "statusDiscard": "Discard annotations",
     "statusDiscardArmed": "Click again to discard all annotations",
-    "statusMoveToolbar": "Move toolbar"
+    "statusMoveToolbar": "Move toolbar",
+    "designDelete": "Delete element",
+    "designDeleteHint": "Remove this element and its subtree",
+    "designMoveHint": "Drag to reorder or nest"
   },
   "composer": {
     "chip": "Annotations ×{n}",
@@ -152,7 +156,24 @@
   },
   "shortcut": {
     "open": "Open Nudge",
-    "noSession": "Open a session first"
+    "noSession": "Open a session first",
+    "annotate": "Nudge: toggle annotation mode",
+    "edit": "Nudge: toggle edit mode",
+    "domTree": "Nudge: toggle DOM tree",
+    "workspace": "Nudge: toggle workspace versions",
+    "holdSpace": "Nudge: hold Space to use the page",
+    "featureOff": "This feature is turned off in Nudge settings",
+    "help": "Keyboard shortcuts",
+    "helpTitle": "Nudge shortcuts",
+    "helpHint": "Edit them in the DSH Keyboard shortcuts panel",
+    "unbound": "Not set",
+    "pageLocal": "On the page",
+    "hintAnnotate": "Click anywhere to add an annotation; drag to select a region",
+    "hintEdit": "Click an element to adjust its styles",
+    "exitMode": "Exit annotate / edit mode",
+    "switchMode": "Switch between annotate and edit",
+    "hintSpaceBefore": "Hold",
+    "hintSpaceAfter": "to use the page"
   },
   "address": {
     "empty": "Enter an address.",
@@ -163,6 +184,9 @@
     "loadFailed": "The page could not load; reload to retry."
   },
   "source": {
+    "reasonUnresolved": "No matching element in the source",
+    "reasonAmbiguous": "Multiple matching elements; cannot pick one",
+    "reasonPathMismatch": "The page structure changed; the element moved",
     "noMapping": "This page has no matching Workspace source file, so the change is preview-only.",
     "notWritable": "The current session policy does not allow writes to the workspace; the change stays a preview.",
     "failed": "Source sync failed: {message}",
@@ -174,9 +198,9 @@
     "openInspectorHint": "Open this page in Nudge",
     "chooseAction": "Choose how to open",
     "openBrowser": "Open browser",
-    "openBrowserHint": "Browse this page as usual",
-    "activateInspector": "Activate Nudge",
-    "activateInspectorHint": "Pick elements, annotate, or edit styles live"
+    "openBrowserHint": "Browse this page like a normal browser",
+    "activateInspector": "Open in Nudge",
+    "activateInspectorHint": "Annotate elements, tune styles, hand it to the agent"
   },
   "link": {
     "openInspector": "Open in Nudge"
@@ -331,6 +355,12 @@
     "loadFailed": "Could not read the configuration: {message}",
     "saveFailed": "Save failed: {message}",
     "readOnly": "This deployment does not allow writing the profile configuration from the settings page; values are shown read-only.",
-    "reloadHint": "If the plugin was just updated, restart the app or toggle dsh.nudge off and on again."
+    "reloadHint": "If the plugin was just updated, restart the app or toggle dsh.nudge off and on again.",
+    "featureFloatingComposer": "Floating composer in fullscreen",
+    "featureFloatingComposerHint": "Keep the conversation composer floating above the right panel while a Nudge tab is fullscreen."
+  },
+  "floating": {
+    "collapse": "Collapse to floating button",
+    "expand": "Open chat"
   }
 }

@@ -10,6 +10,7 @@
 			var box = popoverAnchorRect(),
 				width = viewportWidth(),
 				height = viewportHeight(),
+				usable = Math.max(80, height - safeBottom),
 				wrap = popover.wrap,
 				popWidth = 300,
 				popHeight = 170
@@ -23,14 +24,14 @@
 				top = margin
 			if (box) {
 				left = clamp(box.left, margin, Math.max(margin, width - popWidth - margin))
-				var spaceBelow = height - box.bottom,
+				var spaceBelow = usable - box.bottom,
 					spaceAbove = box.top,
 					preferAbove = spaceAbove >= popHeight + gap,
 					preferBelow = spaceBelow >= popHeight + gap
 				if (preferAbove) top = box.top - popHeight - gap
 				else if (preferBelow) top = box.bottom + gap
 				else top = spaceAbove >= spaceBelow ? box.top - popHeight - gap : box.bottom + gap
-				top = clamp(top, margin, Math.max(margin, height - popHeight - margin))
+				top = clamp(top, margin, Math.max(margin, usable - popHeight - margin))
 			}
 			;(setStyle(wrap, 'left', left + 'px'), setStyle(wrap, 'top', top + 'px'))
 		}

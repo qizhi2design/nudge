@@ -7,11 +7,104 @@
  * applied) into the conversation composer as clip cards, mirroring the Codex
  * `commentAttachments` interaction. The composer tray renders this store and
  * the send hook consumes it once the prompt is accepted by the Host.
+ *
+ * HMR contract
+ * ------------
+ * The Client bundle is re-evaluated on a DSH client hot reload: every module
+ * gets a fresh instance and module-level variables reset, while the page, its
+ * Session scopes and any send wrapper installed by the previous module instance
+ * stay alive. A wrapper installed before a reload therefore keeps running its
+ * *old* closure; a module-scoped store would look empty to it and the pending
+ * cards would never reach the Host. The store state and the send dispatcher
+ * therefore live on `globalThis` under one fixed key, so every module instance
+ * (old or new) reads and writes the same records.
  */
 
-var clipSessions = {};
-var clipListeners = new Set();
-var consumedOpIds = new Set();
+/** Fixed key of the HMR-surviving Client runtime state (one object per page). */
+var CLIENT_STATE_KEY = '__dshnudgeClientState';
+var CLIENT_STATE_VERSION = 1;
+
+/** Fallback bucket when no global object is reachable (never in a browser). */
+var clientStateFallback = {};
+
+/** The page global object (browser) or the sandbox global (tests). */
+function clientGlobalObject() {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis) return globalThis;
+  } catch (error) {
+    /* fall through */
+  }
+  try {
+    if (typeof window !== 'undefined' && window) return window;
+  } catch (error) {
+    /* fall through */
+  }
+  try {
+    if (typeof self !== 'undefined' && self) return self;
+  } catch (error) {
+    /* fall through */
+  }
+  return null;
+}
+
+/** One fresh Client runtime state; only called when no live state exists. */
+function createClientState() {
+  return {
+    version: CLIENT_STATE_VERSION,
+    /** Clip-annotation drafts (this module). */
+    clip: {
+      sessions: {},
+      listeners: new Set(),
+      consumedOpIds: new Set(),
+    },
+    /** Send-hook wiring (bootstrap/register.tsx); created lazily there. */
+    send: null,
+  };
+}
+
+/**
+ * Read (or lazily create) the page-wide Client runtime state.
+ *
+ * Every module instance that asks for a key must receive the *same* object:
+ * the HMR-stable send wrapper only sees dispatcher updates because it and the
+ * new module share this record. Consumers therefore mutate the fields in
+ * place and never replace a sub-object once published.
+ */
+function clientStateStore() {
+  var root = clientGlobalObject();
+  if (root === null) {
+    var fallback = clientStateFallback[CLIENT_STATE_KEY];
+    if (!fallback) {
+      fallback = createClientState();
+      clientStateFallback[CLIENT_STATE_KEY] = fallback;
+    }
+    return fallback;
+  }
+  var current = root[CLIENT_STATE_KEY];
+  if (current && typeof current === 'object' && current.version === CLIENT_STATE_VERSION) return current;
+  var created = createClientState();
+  try {
+    root[CLIENT_STATE_KEY] = created;
+  } catch (error) {
+    return created;
+  }
+  var installed = root[CLIENT_STATE_KEY];
+  return installed && typeof installed === 'object' ? installed : created;
+}
+
+/** The clip-draft slice of the shared Client state (never replaced in place). */
+function clipState() {
+  var state = clientStateStore();
+  var clip = state.clip;
+  if (!clip || typeof clip !== 'object') {
+    clip = { sessions: {}, listeners: new Set(), consumedOpIds: new Set() };
+    state.clip = clip;
+  }
+  if (!clip.sessions || typeof clip.sessions !== 'object') clip.sessions = {};
+  if (!clip.listeners || typeof clip.listeners.add !== 'function') clip.listeners = new Set();
+  if (!clip.consumedOpIds || typeof clip.consumedOpIds.add !== 'function') clip.consumedOpIds = new Set();
+  return clip;
+}
 
 var EMPTY_CLIP_ENTRY = Object.freeze({
   clips: [],
@@ -26,9 +119,10 @@ function clipSessionId(sessionId) {
 }
 
 function clipEntryFor(sessionId, seed) {
+  var sessions = clipState().sessions;
   var id = clipSessionId(sessionId);
   if (id === '') return Object.assign({}, EMPTY_CLIP_ENTRY);
-  var current = clipSessions[id];
+  var current = sessions[id];
   if (current !== undefined) return current;
   var created = {
     clips: [],
@@ -37,12 +131,14 @@ function clipEntryFor(sessionId, seed) {
     expanded: false,
     rev: 0,
   };
-  clipSessions[id] = created;
+  sessions[id] = created;
   return created;
 }
 
 function notifyClips() {
-  clipListeners.forEach(function (fn) {
+  // Iterate a copy: a listener may unsubscribe while being notified.
+  var listeners = Array.from(clipState().listeners);
+  listeners.forEach(function (fn) {
     try {
       fn();
     } catch (error) {
@@ -52,9 +148,10 @@ function notifyClips() {
 }
 
 function subscribeClips(fn) {
-  clipListeners.add(fn);
+  var listeners = clipState().listeners;
+  listeners.add(fn);
   return function () {
-    clipListeners.delete(fn);
+    listeners.delete(fn);
   };
 }
 
@@ -64,21 +161,22 @@ function useClipEntry(sessionId) {
   return React.useSyncExternalStore(
     subscribeClips,
     function () {
-      return clipSessions[id] || EMPTY_CLIP_ENTRY;
+      return clipState().sessions[id] || EMPTY_CLIP_ENTRY;
     },
     function () {
-      return clipSessions[id] || EMPTY_CLIP_ENTRY;
+      return clipState().sessions[id] || EMPTY_CLIP_ENTRY;
     },
   );
 }
 
 function writeClipEntry(sessionId, next) {
+  var sessions = clipState().sessions;
   var id = clipSessionId(sessionId);
   if (id === '') return next;
-  var current = clipSessions[id] || EMPTY_CLIP_ENTRY;
-  clipSessions[id] = Object.assign({}, next, { rev: (current.rev || 0) + 1 });
+  var current = sessions[id] || EMPTY_CLIP_ENTRY;
+  sessions[id] = Object.assign({}, next, { rev: (current.rev || 0) + 1 });
   notifyClips();
-  return clipSessions[id];
+  return sessions[id];
 }
 
 function mergeClipList(current, incoming) {
@@ -133,7 +231,7 @@ function insertClips(sessionId, batch) {
 
 function updateClipNote(sessionId, clipId, note) {
   var id = clipSessionId(sessionId);
-  var current = clipSessions[id];
+  var current = clipState().sessions[id];
   if (!current) return current;
   var next = {
     clips: current.clips.map(function (clip) {
@@ -148,7 +246,7 @@ function updateClipNote(sessionId, clipId, note) {
 
 function removeClip(sessionId, clipId) {
   var id = clipSessionId(sessionId);
-  var current = clipSessions[id];
+  var current = clipState().sessions[id];
   if (!current) return current;
   return writeClipEntry(id, {
     clips: current.clips.filter(function (clip) {
@@ -162,7 +260,7 @@ function removeClip(sessionId, clipId) {
 
 function removeClipOps(sessionId, opId) {
   var id = clipSessionId(sessionId);
-  var current = clipSessions[id];
+  var current = clipState().sessions[id];
   if (!current) return current;
   return writeClipEntry(id, {
     clips: current.clips,
@@ -177,7 +275,7 @@ function removeClipOps(sessionId, opId) {
 /** Drop every pending visual-edit row, keeping the annotation cards. */
 function clearClipOps(sessionId) {
   var id = clipSessionId(sessionId);
-  var current = clipSessions[id];
+  var current = clipState().sessions[id];
   if (!current) return current;
   return writeClipEntry(id, {
     clips: current.clips,
@@ -189,14 +287,15 @@ function clearClipOps(sessionId) {
 
 /** Drop every pending clip and pending edit for one session. */
 function clearClips(sessionId) {
+  var sessions = clipState().sessions;
   var id = clipSessionId(sessionId);
-  if (clipSessions[id] === undefined) return;
-  clipSessions[id] = Object.assign({}, clipSessions[id], { clips: [], ops: [], expanded: false });
+  if (sessions[id] === undefined) return;
+  sessions[id] = Object.assign({}, sessions[id], { clips: [], ops: [], expanded: false });
   notifyClips();
 }
 
 function setClipExpanded(sessionId, expanded) {
-  var current = clipSessions[clipSessionId(sessionId)];
+  var current = clipState().sessions[clipSessionId(sessionId)];
   if (!current || current.expanded === expanded) return;
   writeClipEntry(sessionId, {
     clips: current.clips,
@@ -207,9 +306,27 @@ function setClipExpanded(sessionId, expanded) {
 }
 
 function clipPendingCount(sessionId) {
-  var current = clipSessions[clipSessionId(sessionId)];
+  var current = clipState().sessions[clipSessionId(sessionId)];
   if (!current) return 0;
   return current.clips.length + current.ops.length;
+}
+
+/**
+ * Every Session that still carries a pending batch. The bootstrap uses this
+ * after a hot reload to re-install its send hook before the composer tray
+ * remounts.
+ */
+function clipPendingSessionIds() {
+  var sessions = clipState().sessions;
+  var ids = [];
+  Object.keys(sessions).forEach(function (id) {
+    var entry = sessions[id];
+    if (!entry) return;
+    var clips = entry.clips || [];
+    var ops = entry.ops || [];
+    if (clips.length > 0 || ops.length > 0) ids.push(id);
+  });
+  return ids;
 }
 
 /**
@@ -218,7 +335,7 @@ function clipPendingCount(sessionId) {
  */
 function takeClipBatch(sessionId) {
   var id = clipSessionId(sessionId);
-  var current = clipSessions[id];
+  var current = clipState().sessions[id];
   if (!current || (current.clips.length === 0 && current.ops.length === 0)) return null;
   var taken = {
     clips: current.clips.slice(),
@@ -242,11 +359,12 @@ function restoreClipBatch(sessionId, taken) {
 }
 
 function markOpsConsumed(ops) {
+  var consumed = clipState().consumedOpIds;
   (ops || []).forEach(function (op) {
-    if (op && op.id) consumedOpIds.add(op.id);
+    if (op && op.id) consumed.add(op.id);
   });
 }
 
 function isOpConsumed(opId) {
-  return opId ? consumedOpIds.has(opId) : false;
+  return opId ? clipState().consumedOpIds.has(opId) : false;
 }

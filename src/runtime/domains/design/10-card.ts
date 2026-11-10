@@ -600,7 +600,27 @@
 		var close = doc.createElement('button')
 		;(close.setAttribute('type', 'button'), close.setAttribute('aria-label', locale.designClose), (close.textContent = '\u00d7'), setStyleMap(close, { width: '24px', height: '24px', border: '0px', borderRadius: '7px', background: 'transparent', color: palette.muted, font: '18px/22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', cursor: 'pointer', flex: 'none', padding: '0px' }))
 		close.addEventListener('click', function (event) { ;(event && (event.preventDefault(), event.stopPropagation()), closeDesignCard(!1)) })
-		;(header.appendChild(handle), header.appendChild(tag), header.appendChild(meta), header.appendChild(close))
+		try {
+			handle.setAttribute('title', locale.designMoveHint)
+		} catch {}
+		var remove = doc.createElement('button')
+		;(remove.setAttribute('type', 'button'), remove.setAttribute('aria-label', locale.designDelete), remove.setAttribute('title', locale.designDelete))
+		setStyleMap(remove, { width: '24px', height: '24px', flex: 'none', padding: '0px', border: '0px', borderRadius: '7px', background: 'transparent', color: palette.muted, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', margin: '0px 2px 0px 0px' })
+		;(remove.appendChild(overlayIcon('trash', 14)),
+			remove.addEventListener('mouseenter', function () {
+				try {
+					;(remove.style.setProperty('background', theme.danger), remove.style.setProperty('color', '#ffffff'))
+				} catch {}
+			}),
+			remove.addEventListener('mouseleave', function () {
+				try {
+					;(remove.style.setProperty('background', 'transparent'), remove.style.setProperty('color', overlayPalette().muted))
+				} catch {}
+			}),
+			remove.addEventListener('click', function (event) {
+				;(event && (event.preventDefault(), event.stopPropagation()), structureRemove(element))
+			}))
+		;(header.appendChild(handle), header.appendChild(tag), header.appendChild(meta), header.appendChild(remove), header.appendChild(close))
 		var body = doc.createElement('div')
 		setStyleMap(body, { padding: '0px 13px 10px', overflow: 'auto', maxHeight: 'calc(100vh - 240px)' })
 		var sections = designSections().filter(function (section) {
@@ -714,6 +734,7 @@
 			wrap = designCard.wrap,
 			width = viewportWidth(),
 			height = viewportHeight(),
+			usable = Math.max(80, height - safeBottom),
 			cardWidth = 344,
 			cardHeight = 360
 		try {
@@ -725,7 +746,7 @@
 			left = clamp(box.left, margin, Math.max(margin, width - cardWidth - margin)),
 			top = box.top - cardHeight - gap
 		if (top < margin) top = box.bottom + gap
-		top = clamp(top, margin, Math.max(margin, height - cardHeight - margin))
+		top = clamp(top, margin, Math.max(margin, usable - cardHeight - margin))
 		;(setStyle(wrap, 'left', left + 'px'), setStyle(wrap, 'top', top + 'px'))
 	}
 	function closeDesignCard(revert) {
@@ -745,6 +766,80 @@
 		designCard = card
 		layerAppend(card.wrap)
 		positionDesignCard()
+		scheduleFrame()
+		return !0
+	}
+
+	function structureOuterHTMLOf(element) {
+		var html = ''
+		try {
+			html = element && element.outerHTML !== void 0 ? String(element.outerHTML) : ''
+		} catch {
+			html = ''
+		}
+		return html.length > 4000 ? html.slice(0, 3999) + '\u2026' : html
+	}
+	function structurePayloadOf(element) {
+		return {
+			selector: cssPath(element),
+			path: pathOf(element),
+			outerHTML: structureOuterHTMLOf(element),
+			textSnippet: visibleTextOf(element),
+			sourceHints: sourceHintsOf(element)
+		}
+	}
+	function structureNextSiblingOf(element) {
+		for (var sibling = element && element.nextElementSibling, guard = 0; sibling && guard < 60; guard += 1) {
+			if (!isOwnNode(sibling)) return sibling
+			sibling = sibling.nextElementSibling
+		}
+		return null
+	}
+	/** Delete the element (and its subtree) in the page, then report the edit. */
+	function structureRemove(element) {
+		if (destroyed || !element || element.nodeType !== 1 || isOwnNode(element) || !isConnected(element)) return !1
+		var payload = structurePayloadOf(element)
+		var outcome = applyRemoveTo(element)
+		if (!outcome || !outcome.ok) return !1
+		;((selectionEl = null), (selectionSelector = ''), (hoverEl = null))
+		designCard && closeDesignCard(!1)
+		queueEvent('design-structure', { op: 'remove', selector: payload.selector, path: payload.path, outerHTML: payload.outerHTML, textSnippet: payload.textSnippet, sourceHints: payload.sourceHints })
+		queueEvent('selection-lost', {})
+		updateVisuals()
+		scheduleFrame()
+		return !0
+	}
+	/** Re-parent or reorder the element in the page, then report the edit. */
+	function structureMove(element, parent, before) {
+		if (destroyed || !element || !parent) return !1
+		if (element.nodeType !== 1 || parent.nodeType !== 1 || isOwnNode(element) || isOwnNode(parent)) return !1
+		if (!isConnected(element) || !isConnected(parent)) return !1
+		if (element === parent || (element.contains && element.contains(parent))) return !1
+		if (element.parentElement === parent && (before ? structureNextSiblingOf(element) === before : structureNextSiblingOf(element) === null)) return !1
+		var payload = structurePayloadOf(element),
+			parentPayload = structurePayloadOf(parent),
+			beforePayload = before ? structurePayloadOf(before) : null
+		var outcome = applyMoveTo(element, parent, before || null)
+		if (!outcome || !outcome.ok) return !1
+		queueEvent('design-structure', {
+			op: 'move',
+			selector: payload.selector,
+			path: payload.path,
+			outerHTML: payload.outerHTML,
+			textSnippet: payload.textSnippet,
+			sourceHints: payload.sourceHints,
+			targetParentSelector: parentPayload.selector,
+			targetParentPath: parentPayload.path,
+			targetParentOuterHTML: parentPayload.outerHTML,
+			targetParentTextBefore: parentPayload.textSnippet,
+			beforeSelector: beforePayload ? beforePayload.selector : null,
+			beforePath: beforePayload ? beforePayload.path : null,
+			beforeOuterHTML: beforePayload ? beforePayload.outerHTML : null,
+			beforeTextBefore: beforePayload ? beforePayload.textSnippet : null
+		})
+		selectElement(element, !0)
+		designCard && positionDesignCard()
+		updateVisuals()
 		scheduleFrame()
 		return !0
 	}

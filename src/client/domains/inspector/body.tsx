@@ -5,6 +5,35 @@
  * sync queue.
  */
 
+/** A shortcut may open the tab straight into annotate/edit. */
+function initialInspectorMode(record) {
+  try {
+    var params = record && record.navigation ? record.navigation.params : null;
+    if (params && (params.mode === 'annotate' || params.mode === 'edit')) return params.mode;
+  } catch (error) {
+    /* navigation is not readable yet; a fresh tab starts in browse */
+  }
+  return 'browse';
+}
+
+/** ` · detail` suffix for the source-sync notice; empty when there is no detail. */
+function syncNoticeSuffix(detail) {
+  var text = detail === null || detail === undefined ? '' : String(detail).trim();
+  return text === '' ? '' : ' · ' + text;
+}
+
+/**
+ * Localised copy for the Host's source-locate failure reasons. Unknown reasons
+ * fall through verbatim so a new Host code stays debuggable instead of hidden.
+ */
+function syncReasonText(t, reason) {
+  var text = reason === null || reason === undefined ? '' : String(reason).trim();
+  if (text === 'unresolved-element') return t('source.reasonUnresolved');
+  if (text === 'ambiguous-element') return t('source.reasonAmbiguous');
+  if (text === 'path-mismatch') return t('source.reasonPathMismatch');
+  return text;
+}
+
 function NudgeBody(props) {
   var t = props.t;
   var theme = useDshTheme(props.ctx);
@@ -12,17 +41,63 @@ function NudgeBody(props) {
   var tabRecord = tabInfo && tabInfo.tab ? tabInfo.tab : null;
   var tabId = tabRecord && tabRecord.id ? tabRecord.id : 'nudge-standalone';
   var sessionId = props.sessionId || (tabRecord && tabRecord.sessionId) || '';
+  // The Host remote calls run from callbacks created once; keep the live
+  // session id behind a ref so the sync queue never captures a stale value.
+  var sessionIdRef = React.useRef(sessionId);
+  sessionIdRef.current = sessionId;
   var initialized = React.useRef(false);
   if (!initialized.current) {
     initialized.current = true;
-    ensureTab(tabId, { mode: 'browse' });
+    ensureTab(tabId, { mode: initialInspectorMode(tabRecord) });
   }
   var tab = useTab(tabId);
   if (tab === undefined) {
-    tab = ensureTab(tabId, { mode: 'browse' });
+    tab = ensureTab(tabId, { mode: initialInspectorMode(tabRecord) });
   }
   var pluginConfig = usePluginConfig();
   var features = pluginConfig.values;
+  var shortcutSnapshotState = React.useState(function () {
+    return nudgeShortcutState();
+  });
+  var shortcutSnapshot = shortcutSnapshotState[0];
+  var setShortcutSnapshot = shortcutSnapshotState[1];
+  React.useEffect(function () {
+    return subscribeNudgeShortcuts(function () {
+      setShortcutSnapshot(nudgeShortcutState());
+    });
+  }, []);
+  // Fullscreen presentation: the right-Sidebar panel covers the conversation,
+  // so publish this tab's presentation to the floating-composer manager. Only a
+  // docked, visible Nudge tab in fullscreen keeps the composer floating; a
+  // floating pane or another tab restores the normal layout.
+  var floatingFullscreen = !!(tabInfo && tabInfo.sidebar && tabInfo.sidebar.fullscreen === true);
+  var floatingVisible = !(tabInfo && tabInfo.tab && tabInfo.tab.visible === false);
+  var floatingDocked = !(tabInfo && tabInfo.panel && tabInfo.panel.isFloating === true);
+  var floatingActive = floatingFullscreen && floatingVisible && floatingDocked;
+  React.useEffect(function () {
+    setFloatingComposerRequest(tabId, sessionId, floatingActive);
+    return function () {
+      setFloatingComposerRequest(tabId, sessionId, false);
+    };
+  }, [floatingActive, sessionId, tabId]);
+  // Annotate mode keeps the dock collapsed to the composer: the page owns the
+  // annotate drag area above it. The page itself is never resized — its runtime
+  // receives the dock height as a bottom safe area and clamps its own composer,
+  // style card and annotation bar above the host input box (see the safe-area
+  // effect below). Edit / browse modes behave like plain overlay browsing.
+  var floatingAnnotating = tab.mode === 'annotate';
+  React.useEffect(function () {
+    setFloatingComposerAnnotating(tabId, floatingAnnotating);
+    return function () {
+      setFloatingComposerAnnotating(tabId, false);
+    };
+  }, [floatingAnnotating, tabId]);
+  React.useEffect(function () {
+    setFloatingComposerLabels({
+      collapse: t('floating.collapse'),
+      expand: t('floating.expand'),
+    });
+  }, [t]);
   var carrierRef = React.useRef(null);
   var previousRevisionRef = React.useRef(null);
   var viewportRef = React.useRef(null);
@@ -41,6 +116,13 @@ function NudgeBody(props) {
   var workspaceOpen = workspaceState[0];
   var setWorkspaceOpen = workspaceState[1];
   var [notice, setNotice] = React.useState(null);
+  // Host annotate bar mirror: the floating dock covers the in-page bar, so the
+  // dock renders its own bar and needs the marker-toggle state.
+  var markersHiddenState = React.useState(false);
+  var markersHidden = markersHiddenState[0];
+  var setMarkersHidden = markersHiddenState[1];
+  var markersHiddenRef = React.useRef(false);
+  markersHiddenRef.current = markersHidden;
   var runtimeLocale = React.useMemo(function () {
     return {
       annotation: {
@@ -106,8 +188,45 @@ function NudgeBody(props) {
 
   // ----------------------------------------------------------- source sync queue
   if (queueRef.current === null) {
-    queueRef.current = createSyncQueue(props.ctx, tabId, function () { return tabRef.current; });
+    queueRef.current = createSyncQueue(
+      props.ctx,
+      tabId,
+      function () { return tabRef.current; },
+      function () { return sessionIdRef.current; },
+    );
   }
+
+  // --------------------------------------------------------- sync feedback
+  // The queue only writes `tab.sync`; without this bridge a dropped batch looks
+  // exactly like a successful one (no file change, no visible error).
+  var syncState = tab && tab.sync ? tab.sync : null;
+  var syncStatus = syncState && typeof syncState.status === 'string' ? syncState.status : 'idle';
+  var syncAt = syncState && typeof syncState.at === 'number' ? syncState.at : 0;
+  React.useEffect(function () {
+    if (syncStatus === 'error') {
+      setNotice({ tone: 'error', text: t('dock.syncFailed') + syncNoticeSuffix(syncState && syncState.message) });
+      return undefined;
+    }
+    if (syncStatus === 'preview') {
+      var reason = syncState && syncState.message ? String(syncState.message) : '';
+      var reasonText = reason === 'no-source-mapping' ? '' : syncReasonText(t, reason);
+      setNotice({
+        tone: 'info',
+        text: reason === 'no-source-mapping' ? t('dock.syncDisabled') : t('dock.syncPreview') + syncNoticeSuffix(reasonText),
+      });
+      return undefined;
+    }
+    if (syncStatus === 'done') {
+      var doneText = t('dock.syncSynced') + syncNoticeSuffix(syncState && syncState.message);
+      setNotice({ tone: 'info', text: doneText });
+      var timer = setTimeout(function () {
+        setNotice(function (current) { return current && current.text === doneText ? null : current; });
+      }, SYNC_NOTICE_DISMISS_MS);
+      return function () { clearTimeout(timer); };
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncStatus, syncAt]);
 
   // ----------------------------------------------------------- carrier mount
   React.useEffect(function () {
@@ -211,6 +330,120 @@ function NudgeBody(props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, sessionId]);
+
+  // ------------------------------------------------- page safe area
+  // While the floating composer dock covers the page bottom, the page runtime
+  // clamps its own floating UI (annotation composer, style card, annotation
+  // bar) above the dock. The page is always full height; host DOM is simply a
+  // higher layer than the embedded page, so the dock height is published as a
+  // bottom safe area instead of shrinking the page.
+  React.useEffect(function () {
+    function publish(inset) {
+      var carrier = carrierRef.current;
+      if (!carrier || typeof carrier.setBottomInset !== 'function') return;
+      Promise.resolve(carrier.setBottomInset(inset)).catch(function () {});
+    }
+    var unsubscribe = subscribeFloatingComposerInset(publish);
+    return function () {
+      unsubscribe();
+      publish(0);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
+
+  React.useEffect(function () {
+    var carrier = carrierRef.current;
+    if (!carrier || typeof carrier.setBottomInset !== 'function') return;
+    Promise.resolve(carrier.setBottomInset(floatingComposerInset())).catch(function () {});
+  }, [tab.ready, tab.url]);
+
+  // ------------------------------------------------- host annotate bar
+  // Fullscreen: the page lives in a webview under the floating composer, so its
+  // own annotate bar cannot paint above the input box. The dock renders a host
+  // bar (draggable anywhere) and tells the page to hide its built-in one.
+  React.useEffect(function () {
+    var carrier = carrierRef.current;
+    if (!carrier || typeof carrier.setBarHosted !== 'function') return undefined;
+    Promise.resolve(carrier.setBarHosted(floatingActive === true)).catch(function () {});
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floatingActive, tab.ready]);
+
+  React.useEffect(function () {
+    function forward(name) {
+      var carrier = carrierRef.current;
+      if (!carrier) return;
+      if (name === 'toggleMarkers') {
+        if (typeof carrier.toggleMarkers !== 'function') return;
+        Promise.resolve(carrier.toggleMarkers())
+          .then(function (hidden) {
+            if (typeof hidden === 'boolean') {
+              markersHiddenRef.current = hidden;
+              setMarkersHidden(hidden);
+            }
+          })
+          .catch(function () {});
+        return;
+      }
+      if (typeof carrier[name] !== 'function') return;
+      Promise.resolve(carrier[name]()).catch(function () {});
+    }
+    setFloatingAnnotationBarHandlers({
+      send: function () { forward('sendAnnotations'); },
+      exit: function () { forward('exitAnnotate'); },
+      discard: function () { forward('discardAnnotations'); },
+      locate: function () { forward('locateLastAnnotation'); },
+      toggleMarkers: function () { forward('toggleMarkers'); },
+    });
+    return function () {
+      setFloatingAnnotationBarHandlers(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
+
+  React.useEffect(function () {
+    setFloatingAnnotationBarState({
+      visible: floatingActive === true && tab.mode === 'annotate',
+      count: (tab.annotations || []).length,
+      markersHidden: markersHidden,
+      dark: theme.isDark === true,
+      danger: theme.danger,
+      labels: {
+        annotating: runtimeLocale.statusAnnotating,
+        send: runtimeLocale.statusSend,
+        exit: runtimeLocale.statusExit,
+        locate: runtimeLocale.statusLocate,
+        hideMarkers: runtimeLocale.statusHideMarkers,
+        showMarkers: runtimeLocale.statusShowMarkers,
+        discard: runtimeLocale.statusDiscard,
+        discardArmed: runtimeLocale.statusDiscardArmed,
+        moveToolbar: runtimeLocale.statusMoveToolbar,
+      },
+    });
+    return undefined;
+  }, [floatingActive, tab.mode, tab.annotations && tab.annotations.length, markersHidden, runtimeLocale, theme.isDark, theme.danger]);
+
+  React.useEffect(function () {
+    if (!(floatingActive === true && tab.mode === 'annotate')) return undefined;
+    function sync() {
+      var carrier = carrierRef.current;
+      if (!carrier || typeof carrier.getBarState !== 'function') return;
+      Promise.resolve(carrier.getBarState())
+        .then(function (state) {
+          if (state && typeof state.markersHidden === 'boolean' && state.markersHidden !== markersHiddenRef.current) {
+            markersHiddenRef.current = state.markersHidden;
+            setMarkersHidden(state.markersHidden);
+          }
+        })
+        .catch(function () {});
+    }
+    sync();
+    var timer = setInterval(sync, 800);
+    return function () {
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floatingActive, tab.mode, tab.ready]);
 
   // ----------------------------------------------------------- runtime prefs
   React.useEffect(function () {
@@ -352,6 +585,10 @@ function NudgeBody(props) {
         });
       } else if (event.type === 'annotation-send') {
         insertToComposer();
+      } else if (event.type === 'mode-change' && (event.mode === 'browse' || event.mode === 'annotate' || event.mode === 'edit')) {
+        // The page runtime owns its own mode shortcuts (Esc / Shift+Tab); mirror
+        // the authoritative mode instead of guessing from annotation events.
+        if (tabRef.current.mode !== event.mode) patchTab(tabId, { mode: event.mode });
       } else if (event.type === 'annotation-exit') {
         patchTab(tabId, { mode: 'browse' });
       } else if (event.type === 'design-style' && event.selector && event.property) {
@@ -407,6 +644,33 @@ function NudgeBody(props) {
         var attrOpId = recordOperation(tabId, attrOperation);
         enqueueOperation(attrOperation, attrOpId);
         refreshSelection();
+      } else if (event.type === 'design-structure' && event.selector && (event.op === 'remove' || event.op === 'move')) {
+        var structureSelection = tabRef.current.selection;
+        var structureSame = structureSelection && structureSelection.selector === event.selector;
+        var structureOperation = {
+          kind: event.op,
+          selector: event.selector,
+          path: event.path || (structureSame ? structureSelection.path : undefined),
+          outerHTML: event.outerHTML || (structureSame ? structureSelection.outerHTML : undefined),
+          textSnippet: event.textSnippet || (structureSame ? structureSelection.text : undefined),
+          sourceHints: event.sourceHints || (structureSame ? sourceHintFromDescriptor(structureSelection) : undefined),
+          // One structural gesture is one history step; never merge two of them.
+          coalesceKey: '',
+        };
+        if (event.op === 'move') {
+          structureOperation.targetParentSelector = event.targetParentSelector;
+          structureOperation.targetParentPath = event.targetParentPath;
+          structureOperation.targetParentOuterHTML = event.targetParentOuterHTML;
+          structureOperation.targetParentTextBefore = event.targetParentTextBefore;
+          structureOperation.beforeSelector = event.beforeSelector == null ? null : event.beforeSelector;
+          structureOperation.beforePath = event.beforePath;
+          structureOperation.beforeOuterHTML = event.beforeOuterHTML;
+          structureOperation.beforeTextBefore = event.beforeTextBefore;
+        }
+        var structureOpId = recordOperation(tabId, structureOperation);
+        enqueueOperation(structureOperation, structureOpId);
+        if (event.op === 'remove') patchTab(tabId, { selection: null });
+        else refreshSelection();
       }
     });
   }
@@ -420,6 +684,21 @@ function NudgeBody(props) {
       .map(function (op) {
         if (op.kind === 'style') return { kind: 'style', selector: op.selector, property: op.property, value: op.after };
         if (op.kind === 'text') return { kind: 'text', selector: op.selector, value: op.after };
+        if (op.kind === 'remove') return { kind: 'remove', selector: op.selector, path: op.path, outerHTML: op.outerHTML };
+        if (op.kind === 'move') {
+          return {
+            kind: 'move',
+            selector: op.selector,
+            path: op.path,
+            outerHTML: op.outerHTML,
+            targetParentSelector: op.targetParentSelector,
+            targetParentPath: op.targetParentPath,
+            targetParentOuterHTML: op.targetParentOuterHTML,
+            beforeSelector: op.beforeSelector == null ? null : op.beforeSelector,
+            beforePath: op.beforePath,
+            beforeOuterHTML: op.beforeOuterHTML,
+          };
+        }
         return { kind: 'attr', selector: op.selector, attrName: op.attrName, value: op.after };
       });
     carrier.injectRuntime(tabRef.current.mode, edits).then(function (ok) {
@@ -487,6 +766,12 @@ function NudgeBody(props) {
       sourceHints: operation.sourceHints,
       outerHTML: operation.outerHTML,
       textSnippet: operation.textSnippet,
+      targetParentSelector: operation.targetParentSelector,
+      targetParentOuterHTML: operation.targetParentOuterHTML,
+      targetParentTextBefore: operation.targetParentTextBefore,
+      beforeSelector: operation.beforeSelector,
+      beforeOuterHTML: operation.beforeOuterHTML,
+      beforeTextBefore: operation.beforeTextBefore,
     });
   }
 
@@ -507,6 +792,12 @@ function NudgeBody(props) {
     var current = historyOf(tabRef.current);
     var op = direction === 'undo' ? current.ops[current.index] : current.ops[current.index + 1];
     if (!op) return;
+    if (op.kind === 'remove' || op.kind === 'move') {
+      // Removing a subtree cannot be reversed inside the page; moving would need
+      // the original anchor. Keep the history pointer untouched and explain.
+      setNotice({ tone: 'info', text: t('dock.structureUndoUnavailable') });
+      return;
+    }
     var carrier = carrierRef.current;
     if (!carrier) return;
     var promise = applyInverse(op, direction);
@@ -620,6 +911,9 @@ function NudgeBody(props) {
         };
       });
       insertClips(sessionId, { clips: clips, ops: pendingOps, tabId: tabId });
+      // DSH exposes the conversation service per Session scope: wrap this
+      // Session's send path now, before the composer can send the cards.
+      installClipSendForSession(props.ctx, sessionId);
       var carrier = carrierRef.current;
       annotations.forEach(function (annotation) {
         if (carrier) carrier.removeAnnotation(annotation.id);
@@ -632,6 +926,56 @@ function NudgeBody(props) {
       setSending(false);
     });
   }
+
+  // ----------------------------------------------------------- shortcuts
+  // Every registered command lands here; panel toggles use functional state so
+  // a command queued while the tab was opening still flips the right value.
+  function runShortcutAction(action) {
+    if (action === 'annotate' || action === 'edit') {
+      patchTab(tabId, { mode: tabRef.current.mode === action ? 'browse' : action });
+      return;
+    }
+    if (action === 'dom') {
+      setDomOpen(function (open) { return !open; });
+      return;
+    }
+    if (action === 'workspace') {
+      setWorkspaceOpen(function (open) { return !open; });
+    }
+  }
+
+  React.useEffect(function () {
+    return registerNudgeTabCommands(tabId, sessionId, { run: runShortcutAction });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId, sessionId]);
+
+  var shortcutBindings = {};
+  var shortcutRows = [];
+  NUDGE_SHORTCUT_COMMANDS.forEach(function (command) {
+    var binding = nudgeShortcutBinding(command.id);
+    shortcutBindings[command.id] = binding;
+    shortcutRows.push({
+      id: command.id,
+      label: t(command.label),
+      binding: binding,
+      disabled: command.feature ? features[command.feature] === false : false,
+    });
+  });
+  shortcutBindings['page.refresh'] = nudgeShortcutBinding('page.refresh');
+  shortcutRows.push({
+    id: NUDGE_SHORTCUT_SPACE.id,
+    label: t(NUDGE_SHORTCUT_SPACE.label),
+    binding: { code: 'Space', modifiers: [] },
+    pageLocal: true,
+  });
+  NUDGE_SHORTCUT_PAGE_KEYS.forEach(function (pageKey) {
+    shortcutRows.push({
+      id: pageKey.id,
+      label: t(pageKey.label),
+      binding: pageKey.bindings[0],
+      pageLocal: true,
+    });
+  });
 
   // ----------------------------------------------------------- render
 
@@ -674,6 +1018,11 @@ function NudgeBody(props) {
       workspaceOpen: workspaceOpen,
       onToggleWorkspace: function () {
         setWorkspaceOpen(!workspaceOpen);
+      },
+      shortcuts: {
+        platform: shortcutSnapshot.platform,
+        bindings: shortcutBindings,
+        rows: shortcutRows,
       },
       features: {
         annotate: features.enableAnnotate !== false,
@@ -806,6 +1155,9 @@ function NudgeBody(props) {
             theme: theme,
             sessionId: sessionId,
             currentUrl: tab.url,
+            // A successful source write changes git state; let the panel reload
+            // its snapshot instead of waiting for a manual refresh.
+            refreshToken: tab.sync && tab.sync.status === 'done' && typeof tab.sync.at === 'number' ? tab.sync.at : 0,
             onClose: function () {
               setWorkspaceOpen(false);
             },

@@ -27,20 +27,41 @@ DSH Desktop 原生插件（插件包 `dsh.nudge`，插件 ID `dsh.nudge`）。�
 - **热更新**：Host 监视工作区文件变化，Client 轮询 revision；浏览模式下页面自动刷新，标注 / 编辑模式改为提示「有更新」，回到浏览模式再刷新。插件自己的样式同步、用户手改、Agent/AI 编辑都会触发同一套刷新。
 - **交给 Agent**：点「插入」把标注变成对话框里的 **clip 批注卡片**（元素截图缩略图 + 标签 + 意见，可编辑 / 删除，带「N 条注释」计数 chip），随用户下一条消息一起发送；已生效的视觉修改与截图路径同样并入这条消息的上下文。
 - **设置面板**：设置 → 左侧「轻推」是产品级偏好页——插件界面语言（跟随 DSH / 中文 / English）、标注 / 编辑 / DOM 树 / 工作区版本 / 自动热更新开关、链接与浏览器标签右键菜单开关，以及「关于与更新」卡片（版本 / 构建时间 / git 状态 / 插件目录 / 检查更新）。改动立即写回 profile 的 `cordis.patch.yml` 并生效。
-- **窄宽度工具栏**：右侧边栏变窄（或打开工作区 / DOM 停靠面板）时，工具栏自动分成两行——第一行只保留后退 / 前进 / 刷新 / 地址栏 / 前往，第二行放标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 外部；地址栏不再被图标挤扁，极窄时再收起前进与「前往」按钮（Enter 仍可提交）。
-- **DSH 原生 UI**：右侧边栏 Tab、设置页、主题 Token、Light/Dark 自适应；不改变 DSH 一级布局。
+- **系统快捷键**：把「打开轻推 / 切换标注 / 切换编辑 / DOM 树 / 工作区版本」注册进 DSH 的快捷键系统（可在「设置 → 快捷键」中查看与改键），默认沿用参考实现的 `⌘⇧.` 标注切换；hover 工具栏标注 / 编辑按钮时出现的交互 tooltip、键盘图标展开的快捷键表都用 lucide 图标绘制 ⌘ / ⌥ / ⇧ / Space 键帽（tooltip 由插件在宿主 DOM 自绘 fixed 卡片，避开 DSH Electron 渲染器里 Radix popper 停在屏外的问题；卡片表面 / 文字 / 边框跟随 DSH Light / Dark token）。
+- **全屏底部对话**：轻推 Tab 展开全屏后，原生输入框贴视口底部居中停靠；点输入框或直接输入，消息区在它上方展开（底部停靠面板，无标题栏 / 阴影），点页面或面板外收回。输入条与消息面板两种形态都带「收缩为悬浮按钮」入口，点击后整块收成右下角 46px 圆形对话按钮，再点恢复。网页容器在所有模式下铺满到底部，输入条高度会作为底部安全区同步给页面 runtime，标注浮层与样式卡始终停在输入框上方；全屏标注模式下「正在批注」浮条改由宿主层渲染——与页面浮条逐像素同款（尺寸 / 调色板 / Lucide 图标 / 字体 / 间距 / 悬停完全一致），只是层级高于输入框、可拖到窗口任意位置，动作同步到页面 runtime；标注模式进入时先收成输入条，点输入框仍可展开历史。复用宿主真实输入框（草稿 / 附件 / 模型 / 发送路径不变）；检测到 `@yfwu2020/dsh-full-view` 等同类悬浮聊天插件时自动让位。可在「设置 → 轻推 → 功能」关闭。
+- **双行工具栏**：轻推始终是上下两行——第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往），第二行是轻推操作栏（标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 在系统浏览器打开）。右侧边栏很窄（<460px）时第二行标签收成图标，极窄时再收起前进与「前往」按钮（Enter 仍可提交）；操作栏最右侧的键盘按钮展开/收起当前生效的快捷键表。
+- **DSH 原生 UI**：右侧边栏 Tab（Tab 标题带轻推标记）、设置页、主题 Token、Light/Dark 自适应；不改变 DSH 一级布局。
 - **组件化实现**：宿主 UI 使用 **React + TypeScript + shadcn-style Button（CVA）+ Radix Tooltip + lucide-react + Tailwind（`dshnudge-` 前缀，`components.json` 配置）**；页面注入层保持 Vanilla Shadow DOM，避免污染任意站点。
 
 ## 打开方式
 
 1. 快捷键 **⌘⇧I**（Windows/Linux `Ctrl+Shift+I`）打开轻推。
-2. 或**点击右侧边栏引导卡片「浏览器」**：卡片会展开子级菜单 —— **打开浏览器** / **激活轻推**，选择后者直接打开轻推（不再单独占用引导卡片）。
+2. 或**点击右侧边栏引导卡片「浏览器」**：卡片会展开子级菜单 —— **打开浏览器** / **在轻推中打开**，选择后者直接打开轻推（不再单独占用引导卡片）。
 3. 或打开任意内置浏览器 Tab 后，点击该 Tab 的 **⋮ 菜单 → 在轻推中打开**：会把该 Tab 当前的 URL 带给新的轻推标签页（`ctx.sidebarRight.tabDomain` 读取导航参数）。
 4. 或在聊天里右键链接 → **在轻推中打开**。
 
 ![浏览器卡片的选择菜单](docs/evidence/12-browser-chooser.png)
 
 地址栏输入 HTTP(S) 地址即可打开页面。打开后可用右侧边栏的「全屏」按钮把 Browser Workspace 展开到整窗宽。
+
+## 快捷键
+
+轻推把每个产品动作注册进 DSH 的快捷键服务（`ctx.shortcuts.register`），所以它们会出现在 DSH 的「快捷键」面板里，和内置命令一样可录制、改键、恢复默认；同一份生效键位会实时显示在工具栏 hover tooltip 与工具栏最右侧键盘按钮展开的快捷键表上。键帽用 lucide 图标绘制（`Command` / `Option` / `ArrowBigUp` / `Space`），没有对应图标的键（Ctrl、字母、标点）保留文本。
+
+| 动作 | 默认快捷键（macOS / Windows·Linux） | 说明 |
+| --- | --- | --- |
+| 打开轻推 | `⌘⇧I` / `Ctrl+Shift+I` | 已打开时聚焦现有轻推 Tab，而不是再开一个 |
+| 切换标注模式 | `⌘⇧.` / `Ctrl+Shift+.` | 沿用 Codex 参考实现的 `CmdOrCtrl+Shift+.`；打开轻推时会直接进入标注模式 |
+| 切换编辑模式 | `⌘⇧E` / `Ctrl+Shift+E` | 打开轻推时带浏览器 Tab 的当前 URL |
+| 切换 DOM 树 | `⌘⇧D` / `Ctrl+Shift+D` | 需要先有轻推 Tab；没有时按当前会话打开 |
+| 切换工作区版本 | `⌘⇧G` / `Ctrl+Shift+G` | 同上 |
+| 临时操作页面 | `Space`（按住，页面内） | 只在标注 / 编辑模式生效；以只读 fixed 行出现在 DSH 快捷键面板 |
+
+- 刚打开的轻推 Tab 会通过导航参数带入初始模式（`params.mode`），面板命令则在 body 挂载后由命令总线补发，不会丢事件。
+- 功能开关（标注 / 编辑 / DOM 树 / 工作区版本）关闭时，对应快捷键返回 blocked 原因，不会静默执行。
+- 快捷键表是工具栏内的普通布局行（展开时把工具栏撑高），不覆盖 `<webview>`；交互提示走 Radix tooltip，与现有工具栏 tooltip 同一套 surface。
+- 页面内的 `Space` 临时接管、`Esc` 退出、`Enter / Shift+Enter` 提交等属于注入层本地输入，不占用系统快捷键组合。
+- Space 在标注 / 编辑两种模式下共用同一套临时接管逻辑；工具栏按钮点击不抢焦点（避免 Space 误触模式开关），样式卡 / composer 等浮层内 Space 仍按输入或按钮激活处理。
 
 ## 使用
 
@@ -84,6 +105,18 @@ DSH Desktop 原生插件（插件包 `dsh.nudge`，插件 ID `dsh.nudge`）。�
    - **标注 / 编辑模式**下不打断当前操作，只显示「页面有更新，回到浏览模式后自动刷新」，回到浏览模式立即刷新；
    - 插件自己的样式同步、用户手改、Agent/AI 编辑都会触发同一条链路；外部 dev server 的页面同样适用（变化来自工作区文件监视，不依赖页面侧注入）。
 6. 只读策略（`read-only`）下：文件扫描、git 状态 / 历史、静态预览、热更新仍然可用；切换分支、恢复版本、提交会被 Host 拒绝并在面板显示原因。
+
+### 全屏时继续对话（悬浮输入框）
+
+1. 点击右侧面板的「全屏」把轻推展开到整窗宽。
+2. 输入框贴在视口底部、水平居中（展开时宽约 880px，收起时约 760px），页面保留大部分空间。
+3. 点输入框或直接开始输入，消息区在输入框上方展开成底部停靠面板（宽约 880px、高约 70% 视口），带宿主原生消息、附件、权限、模型与发送按钮，草稿与普通分栏共用同一份。
+4. 点击页面、面板其他区域或把焦点移回网页，消息区收回，只留下贴底输入框。
+5. 进入标注模式时，输入条保持收起即可开始标注；全屏页面不缩短，输入条高度会作为底部安全区发布给页面 runtime，页面里的「正在批注」浮条、标注浮层与样式卡始终停在输入框上方，可自由拖动。点输入框仍可展开历史。
+6. 展开态和输入条态都有收缩按钮（展开时在面板右上角，收起时浮在输入条右上方）：点击后整块面板收成右下角的圆形悬浮按钮（带对话图标），再点恢复展开。
+7. 点面板的「退出全屏」或收起面板，对话自动回到原来的分栏布局。
+
+实现方式：插件只在 DOM 上给当前会话列打一个语义标记，由 CSS 把它重排到右侧面板之上；不复制输入框、不转发输入事件，宿主仍完全拥有编辑器与会话状态。若检测到其他插件已经在悬浮对话（例如 `@yfwu2020/dsh-full-view`），轻推不接管，避免两个插件同时改同一列。
 
 ### 主题（Light / Dark）
 
@@ -218,11 +251,11 @@ Host 插件 Config 存储在同一 profile patch 行，**设置 → 轻推** 管
 ## 测试
 
 ```bash
-node test/client-smoke.mjs            # Client bundle 工厂 + 注册项 + 工具栏阈值 + 配置 store（53 checks）
+node test/client-smoke.mjs            # Client bundle 工厂 + 注册项 + 快捷键 + 工具栏阈值 + 配置 store（79 checks）
 node test/client-theme.test.mjs       # 宿主主题桥：body token / 深色翻转 / 系统兜底 / store 通知 / 组件渲染（36 checks）
 node test/settings-page.test.mjs      # 设置 → 轻推：语言 / 功能开关 / 右键菜单 / 关于与更新 / 只读（42 checks）
 node test/workspace-panel.test.mjs    # 工作区版本面板：文件 / 分支 / 提交 / 恢复 + hotReloadDecision（99 checks）
-node test/clip-annotations.test.mjs   # clip 草稿存储 + 占位/恢复 + 发送上下文（39 checks）
+node test/clip-annotations.test.mjs   # clip 草稿存储 + 占位/恢复 + 发送上下文 + HMR 僵尸包装回归（111 checks）
 node test/runtime-smoke.mjs           # 页面运行时 API/行为（257 checks）
 node test/source-sync.test.mjs        # 源码持久化（23 groups / 125 assertions）
 node test/workspace-domain.test.mjs   # 真实临时 git 仓库：扫描 / 分支 / 提交 / 恢复 / 预览服务器 / watcher（235 assertions）
@@ -232,11 +265,11 @@ node test/workspace-e2e.test.mjs      # 端到端：workspace → previewOpen �
 
 最近一次结果：
 
-- `client-smoke`：ok / 53 checks
+- `client-smoke`：ok / 79 checks
 - `client-theme`：36 checks / 0 failures
 - `settings-page`：42 checks / 0 failures
 - `workspace-panel`：99 checks / 0 failures
-- `clip-annotations`：39 checks / 0 failures
+- `clip-annotations`：111 checks / 0 failures
 - `runtime-smoke`：257 checks / 0 failures
 - `source-sync`：23 groups / 125 assertions，exit 0
 - `workspace-domain`：235 assertions / 0 failures（真实 git 仓库 + 真实静态服务器）
@@ -268,7 +301,7 @@ node test/workspace-e2e.test.mjs      # 端到端：workspace → previewOpen �
 - 样式重置只会删除插件自己写入 HTML override 块中的声明；用户已有样式表中的重置仍为 `preview`（避免误删作者样式）。
 - 标注的 `region` / 文字选区 `textSelection.rects` 保存拖拽时的视口坐标，页面滚动后框不会跟随（元素标注会按 selector 实时重算）。
 - 标注 / 历史 / 选中状态保存在 Client 内存中（每个 Tab）。刷新页面会重新注入运行时并重放当前未撤销的视觉修改；插件重载会清空标注列表。
-- clip 批注草稿按 Session 保存在 Client 内存中：插件热重载 / 页面刷新会清空；同一份标注重复插入会按 annotation id 合并，不会重复出卡。
+- clip 批注草稿按 Session 保存在 Client 内存中：页面刷新会清空，插件热重载（HMR）不会——草稿与发送 dispatcher 挂在页面级共享状态上；同一份标注重复插入会按 annotation id 合并，不会重复出卡。
 - 发送时 clip 上下文以 Markdown 追加在用户消息之后（DSH 的对话消息没有原生批注附件渲染位），消息气泡里会看到这段结构化文本。
 - 工作区版本 / git 功能要求仓库位于**会话 cwd 内**且与 `sourceRoot` 有重叠；会话从仓库子目录打开（仓库根在 cwd 之外）时面板会显示仓库不可用，不会越界操作。`sourceRoot` 是仓库子目录时可用，但仓库内、`sourceRoot` 之外的改动不会出现在提交面板里（`gitCommit` 省略文件列表时仍是仓库范围的 `git add -A`）。
 - 只支持本地分支切换；不做 push / pull / merge / rebase / reset --hard / clean。脏工作区切换分支必须显式「暂存并切换」或先提交，插件不会静默丢弃改动。

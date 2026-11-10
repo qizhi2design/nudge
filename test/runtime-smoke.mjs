@@ -546,6 +546,22 @@ class FakeElement {
   remove() {
     if (this.parentNode) this.parentNode.removeChild(this)
   }
+  insertBefore(node, reference) {
+    if (!node) return node
+    if (node.parentNode) node.parentNode.removeChild(node)
+    const index = reference ? this.childNodes.indexOf(reference) : -1
+    if (index === -1) this.childNodes.push(node)
+    else this.childNodes.splice(index, 0, node)
+    node.parentNode = this
+    return node
+  }
+  get nextElementSibling() {
+    const parent = this.parentNode
+    if (!parent) return null
+    const siblings = parent.children
+    const index = siblings.indexOf(this)
+    return index >= 0 ? siblings[index + 1] || null : null
+  }
   getAttribute(name) {
     const key = String(name).toLowerCase()
     for (const attribute of this.attributes) {
@@ -837,6 +853,35 @@ const history = {
 
 const location = { href: 'http://127.0.0.1:4173/index.html', origin: 'http://127.0.0.1:4173' }
 
+
+const themeMedia = {
+  media: '(prefers-color-scheme: dark)',
+  matches: false,
+  _listeners: new Set(),
+  addEventListener(type, handler) {
+    if (type === 'change') this._listeners.add(handler)
+  },
+  removeEventListener(type, handler) {
+    if (type === 'change') this._listeners.delete(handler)
+  },
+  addListener(handler) {
+    this._listeners.add(handler)
+  },
+  removeListener(handler) {
+    this._listeners.delete(handler)
+  },
+  setMatches(value) {
+    this.matches = value === true
+    for (const handler of Array.from(this._listeners)) handler({ matches: this.matches })
+  },
+  listenerCount() {
+    return this._listeners.size
+  },
+}
+function matchMedia(query) {
+  return themeMedia
+}
+
 const sandbox = {
   document,
   location,
@@ -845,6 +890,7 @@ const sandbox = {
   innerHeight: 800,
   devicePixelRatio: 1,
   CSS: { escape: (value) => String(value) },
+  matchMedia,
   getComputedStyle,
   requestAnimationFrame,
   cancelAnimationFrame,
@@ -914,7 +960,8 @@ async function run() {
   const methods = [
     'setMode', 'setSelection', 'clearSelection', 'setSelectionByPath', 'getDescriptor',
     'getAncestry', 'drainEvents', 'getState', 'applyStyle', 'applyText', 'applyAttr',
-    'reapply', 'setLocale', 'setTheme', 'locate', 'openAnnotationEditor',
+    'reapply', 'setLocale', 'setTheme', 'setBottomInset', 'setBarHosted', 'getBarState',
+    'toggleMarkers', 'discardAnnotations', 'sendAnnotations', 'exitAnnotate', 'locateLastAnnotation', 'locate', 'openAnnotationEditor',
     'updateAnnotation', 'removeAnnotation', 'reinit', 'destroy',
   ]
   for (const method of methods) {
@@ -933,6 +980,61 @@ async function run() {
   eq('state version', state0.version, 1)
   eq('no selection initially', state0.selection, null)
   eq('no annotations initially', state0.annotations.length, 0)
+
+  section('annotation bar palette tokens')
+  eq('palette: theme media starts light', themeMedia.matches, false)
+  runtime.setMode('annotate')
+  runtime.setSelection('body')
+  flushFrames()
+  const barRoot = document.querySelector('[data-dsh-nudge="bar"]')
+  ok('palette: annotate bar rendered', !!barRoot)
+  const barButtons = barRoot ? barRoot.querySelectorAll('button') : []
+  eq('palette: bar keeps its button set', barButtons.length, 6)
+  const locateButton = barButtons[1]
+  const sendButton = barButtons[4]
+  const locateGlyph = locateButton && locateButton.childNodes ? locateButton.childNodes[0] : null
+  ok('palette: locate button carries an svg glyph', !!locateGlyph && String(locateGlyph.tagName).toLowerCase() === 'svg')
+  eq('palette: light bar uses the light surface token', barRoot && barRoot.style.getPropertyValue('background'), '#ffffff')
+  eq('palette: light bar uses the light border token', barRoot && barRoot.style.getPropertyValue('border-color'), 'rgba(15,17,21,0.12)')
+  eq('palette: light bar uses the light text token', barRoot && barRoot.style.getPropertyValue('color'), '#0f1115')
+  eq('palette: disabled send uses the light disabled fill', sendButton && sendButton.style.getPropertyValue('background'), '#e6ecf5')
+  eq('palette: disabled send keeps a readable ink', sendButton && sendButton.style.getPropertyValue('color'), '#4a5563')
+  eq('palette: disabled send is not opacity-faded', sendButton && sendButton.style.getPropertyValue('opacity'), '')
+  eq('palette: disabled send reports aria-disabled', sendButton && sendButton.getAttribute('aria-disabled'), 'true')
+  ok(
+    'palette: disabled send fill differs from its ink',
+    !!sendButton && sendButton.style.getPropertyValue('background') !== sendButton.style.getPropertyValue('color'),
+  )
+  dispatch(locateButton, new FakeEvent('mouseenter', { target: locateButton }))
+  eq('palette: hovered icon uses the light text token', locateButton && locateButton.style.getPropertyValue('color'), '#0f1115')
+  eq('palette: hovered icon uses the light hover fill', locateButton && locateButton.style.getPropertyValue('background'), 'rgba(15,17,21,0.06)')
+  dispatch(locateButton, new FakeEvent('mouseleave', { target: locateButton }))
+  eq('palette: resting icon uses the muted token', locateButton && locateButton.style.getPropertyValue('color'), '#61666b')
+
+  // Until the host publishes an explicit flag, the OS preference drives the palette.
+  themeMedia.setMatches(true)
+  eq('palette: OS dark preference repaints the bar dark', barRoot && barRoot.style.getPropertyValue('background'), '#262626')
+  eq('palette: dark bar uses the dark border token', barRoot && barRoot.style.getPropertyValue('border-color'), 'rgba(255,255,255,0.10)')
+  eq('palette: dark bar uses the dark text token', barRoot && barRoot.style.getPropertyValue('color'), '#f5f5f5')
+  eq('palette: dark disabled send uses the dark disabled fill', sendButton && sendButton.style.getPropertyValue('background'), '#39424f')
+  eq('palette: dark disabled send keeps a readable ink', sendButton && sendButton.style.getPropertyValue('color'), '#c3ccd8')
+  themeMedia.setMatches(false)
+  eq('palette: light preference restores the light bar', barRoot && barRoot.style.getPropertyValue('background'), '#ffffff')
+
+  // The client publishes an explicit isDark flag; it must win over the OS hint.
+  runtime.setTheme({ isDark: true })
+  flushFrames()
+  eq('palette: explicit dark host flag paints the dark bar', barRoot && barRoot.style.getPropertyValue('background'), '#262626')
+  eq('palette: explicit dark bar text token', barRoot && barRoot.style.getPropertyValue('color'), '#f5f5f5')
+  dispatch(locateButton, new FakeEvent('mouseenter', { target: locateButton }))
+  eq('palette: dark hovered icon uses the dark text token', locateButton && locateButton.style.getPropertyValue('color'), '#f5f5f5')
+  dispatch(locateButton, new FakeEvent('mouseleave', { target: locateButton }))
+  runtime.setTheme({ isDark: false })
+  flushFrames()
+  eq('palette: explicit light flag restores the light bar', barRoot && barRoot.style.getPropertyValue('background'), '#ffffff')
+  runtime.clearSelection()
+  runtime.setMode('browse')
+  flushFrames()
 
   section('mode switching')
   eq('setMode annotate', runtime.setMode('annotate'), true)
@@ -1125,6 +1227,90 @@ async function run() {
   eq('reapply attr applied', link.getAttribute('data-x'), '1')
   eq('reapply has result details', reapplyResult.results.length, 4)
 
+
+  section('structure reapply')
+  const moveHost = element('div', { id: 'move-host', parent: document.body })
+  const moveA = element('span', { id: 'move-a', text: 'A', parent: moveHost })
+  const moveB = element('span', { id: 'move-b', text: 'B', parent: moveHost })
+  const moveTarget = element('div', { id: 'move-target', parent: document.body })
+  element('p', { id: 'move-p', text: 'P', parent: moveTarget })
+  const structureResult = runtime.reapply([
+    { kind: 'move', selector: '#move-a', targetParentSelector: '#move-target', beforeSelector: null },
+    { kind: 'remove', selector: '#move-b' },
+  ])
+  eq('structure reapply applied count', structureResult.applied, 2)
+  deepEq('structure reapply result kinds', structureResult.results.map((entry) => entry.kind), ['move', 'remove'])
+  eq('structure move re-parented the element', moveA.parentNode, moveTarget)
+  eq('structure move appended as last child', moveA.nextElementSibling, null)
+  eq('structure move kept the old parent', moveHost.children.length, 0)
+  eq('structure remove detached the element', moveB.parentNode, null)
+  const protectedStructure = runtime.reapply([
+    { kind: 'remove', selector: 'body' },
+    { kind: 'move', selector: '#move-target', targetParentSelector: 'body', beforeSelector: '#move-a' },
+    { kind: 'move', selector: '#move-a', targetParentSelector: '#move-a' },
+  ])
+  eq('structure reapply refuses body removal', protectedStructure.results[0].reason, 'protected-element')
+  eq('structure reapply protects body for move', protectedStructure.results[1].ok, false)
+  eq('structure reapply rejects a self destination', protectedStructure.results[2].reason, 'invalid-move-target')
+
+
+  section('edit-mode structure drag and delete')
+  eq('edit mode for drag', runtime.setMode('edit'), true)
+  const dragHost = element('div', { id: 'drag-host', parent: document.body, rect: { x: 0, y: 700, width: 400, height: 200 } })
+  const dragOne = element('span', { id: 'drag-one', text: 'one', parent: dragHost, rect: { x: 0, y: 700, width: 100, height: 40 } })
+  const dragTwo = element('span', { id: 'drag-two', text: 'two', parent: dragHost, rect: { x: 0, y: 740, width: 100, height: 40 } })
+  flushEvents(runtime)
+  dispatch(dragOne, new FakeEvent('mousedown', { target: dragOne, clientX: 10, clientY: 720 }))
+  dispatch(dragOne, new FakeEvent('mousemove', { target: dragOne, clientX: 10, clientY: 780 }))
+  flushFrames()
+  const dropNode = document.querySelector('[data-dsh-nudge="drop"]')
+  ok('structure drag shows a drop indicator', !!dropNode && dropNode.style.getPropertyValue('display') === 'block')
+  dispatch(dragHost, new FakeEvent('mouseup', { target: dragHost, clientX: 10, clientY: 780 }))
+  const dragEvents = flushEvents(runtime)
+  const moveEvent = dragEvents.find((event) => event.type === 'design-structure' && event.op === 'move')
+  ok('structure drag queues a move event', !!moveEvent)
+  eq('structure move event source', moveEvent && moveEvent.selector, '#drag-one')
+  eq('structure move event parent', moveEvent && moveEvent.targetParentSelector, '#drag-host')
+  eq('structure move event anchor', moveEvent && moveEvent.beforeSelector, null)
+  deepEq(
+    'structure drag reordered the DOM',
+    dragHost.children.map((child) => child.id),
+    ['drag-two', 'drag-one'],
+  )
+  eq('structure drag selects the moved element', runtime.getState().selection.id, 'drag-one')
+  eq('structure drop indicator hidden after drop', document.querySelector('[data-dsh-nudge="drop"]').style.getPropertyValue('display'), 'none')
+
+  const keydownDelete = dispatch(document.body, new FakeEvent('keydown', { target: document.body, key: 'Delete' }))
+  const deleteEvents = flushEvents(runtime)
+  const removeEvent = deleteEvents.find((event) => event.type === 'design-structure' && event.op === 'remove')
+  ok('Delete key queues a remove event', !!removeEvent)
+  eq('Delete key source selector', removeEvent && removeEvent.selector, '#drag-one')
+  eq('Delete key detached the element', dragOne.parentNode, null)
+  deepEq(
+    'Delete key keeps the sibling',
+    dragHost.children.map((child) => child.id),
+    ['drag-two'],
+  )
+  eq('Delete key clears the selection', runtime.getState().selection, null)
+  eq('Delete keydown is consumed', keydownDelete, false)
+
+  // A mode flip clears the post-drag click suppression from the mouseup above.
+  runtime.setMode('browse')
+  runtime.setMode('edit')
+  dispatch(dragTwo, new FakeEvent('click', { target: dragTwo }))
+  const cardRoot = document.querySelector('[data-dsh-nudge="design"]')
+  ok('edit click opens the design card', !!cardRoot)
+  const deleteButton = cardRoot && cardRoot.querySelector('button[aria-label="Delete element"]')
+  ok('design card has a delete button', !!deleteButton)
+  const dragHandle = cardRoot && cardRoot.querySelector('span[title]')
+  ok('design card drag handle explains the drag', !!dragHandle && dragHandle.getAttribute('title') === 'Drag to reorder or nest')
+  dispatch(deleteButton, new FakeEvent('click', { target: deleteButton }))
+  const cardRemoveEvents = flushEvents(runtime).filter((event) => event.type === 'design-structure' && event.op === 'remove')
+  eq('design card delete queues a remove event', cardRemoveEvents.length, 1)
+  eq('design card delete removed the element', dragTwo.parentNode, null)
+  eq('design card closes after delete', document.querySelector('[data-dsh-nudge="design"]'), null)
+  eq('mode restored after structure tests', runtime.setMode('browse'), true)
+
   section('selection-lost event')
   runtime.setSelection('#destroyable')
   eq('selection set before removal', runtime.getState().selection.id, 'destroyable')
@@ -1182,6 +1368,19 @@ async function run() {
   dispatch(floatingBarSend || floatingBar.querySelector('button'), new FakeEvent('click', { target: floatingBarSend || floatingBar.querySelector('button') }))
   ok('floating bar send queues event', flushEvents(runtime).some((event) => event.type === 'annotation-send'))
 
+  // Host bar contract (fullscreen floating dock): the host owns the bar chrome,
+  // the page hides its own bar and serves state/actions.
+  ok('page bar can be hosted by the dock', runtime.setBarHosted(true) === true)
+  ok('hosted page bar is hidden', floatingBar.style.getPropertyValue('display') === 'none')
+  const barState = runtime.getBarState()
+  ok('host bar state reports mode, count and marker visibility', !!barState && barState.annotating === true && typeof barState.count === 'number' && typeof barState.markersHidden === 'boolean')
+  ok('host bar toggles marker visibility', runtime.toggleMarkers() === true)
+  ok('host bar toggles markers back', runtime.toggleMarkers() === false)
+  ok('host bar sends pending annotations', runtime.sendAnnotations() === true)
+  ok('host bar send queues the annotation-send event', flushEvents(runtime).some((event) => event.type === 'annotation-send'))
+  ok('page bar returns when the host releases it', runtime.setBarHosted(false) === true)
+  ok('page bar visible again after release', floatingBar.style.getPropertyValue('display') === 'flex')
+
   // Hide markers collapses pins but keeps the toolbar; show markers restores them.
   dispatch(floatingBar.querySelector('button[aria-label="Hide markers"]'), new FakeEvent('click', { target: floatingBar.querySelector('button[aria-label="Hide markers"]') }))
   ok('hidden markers remove the pin', rootAfterClick.querySelector('[data-dsh-nudge="badge"]') === null)
@@ -1190,6 +1389,16 @@ async function run() {
   ok('bar swaps to the show-markers action', !!showMarkers)
   dispatch(showMarkers || floatingBar.querySelector('button'), new FakeEvent('click', { target: showMarkers || floatingBar.querySelector('button') }))
   ok('show markers restore the pin', !!rootAfterClick.querySelector('[data-dsh-nudge="badge"]'))
+
+  // The host floating composer publishes its dock height as a bottom safe area:
+  // the page keeps its full height, and its own floating UI stays above the dock.
+  const barBottomBefore = parseFloat(floatingBar.style.getPropertyValue('bottom')) || 0
+  ok('page safe area api accepts a positive inset', runtime.setBottomInset(120) === true)
+  const barBottomWithInset = parseFloat(floatingBar.style.getPropertyValue('bottom')) || 0
+  ok('annotation bar lifts above the reserved dock strip', barBottomWithInset >= 128)
+  ok('page safe area clamps negative input', runtime.setBottomInset(-40) === true)
+  const barBottomReset = parseFloat(floatingBar.style.getPropertyValue('bottom')) || 0
+  ok('annotation bar returns to its pre-inset position', Math.abs(barBottomReset - barBottomBefore) <= 6)
 
   // Discard is a two-step action: arm, then clear.
   const discardButton = floatingBar.querySelector('button[aria-label="Discard annotations"]')
@@ -1293,6 +1502,10 @@ async function run() {
   dispatch(textEditor, new FakeEvent('change', { target: textEditor }))
   ok('text edit queues a design-text event', flushEvents(runtime).some((event) => event.type === 'design-text' && event.after === '立即购买'))
   eq('text edit applies to the element', button.textContent, '立即购买')
+  dispatch(document, new FakeEvent('keydown', { target: document, key: ' ', code: 'Space' }))
+  ok('space does not pass through while the design card is open', designRoot.getAttribute('data-dsh-nudge-passthrough') !== 'true')
+  dispatch(textEditor, new FakeEvent('keydown', { target: textEditor, key: ' ', code: 'Space' }))
+  ok('space stays an input character inside the design card', designRoot.getAttribute('data-dsh-nudge-passthrough') !== 'true')
   dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
   eq('escape closes design card', designRoot.querySelector('[data-dsh-nudge="design"]'), null)
   eq('cancel reverts the text edit', button.textContent, '按钮')
@@ -1410,12 +1623,106 @@ async function run() {
   runtime2.setMode('browse')
   eq('page-info queued after re-injection', runtime2.drainEvents().some((event) => event.type === 'page-info'), true)
 
+  section('mode keyboard shortcuts')
+  const keyInput = element('input', { id: 'key-input', parent: document.body })
+  function pressKey(target, init) {
+    const event = new FakeEvent('keydown', Object.assign({ target: target }, init))
+    dispatch(target, event)
+    return event
+  }
+  runtime2.setMode('annotate')
+  flushEvents(runtime2)
+  runtime2.setMode('annotate')
+  eq('no mode-change for a same-mode call', flushEvents(runtime2).some((event) => event.type === 'mode-change'), false)
+
+  const toEdit = pressKey(document.body, { key: 'Tab', shiftKey: true })
+  eq('Shift+Tab switches annotate to edit', runtime2.getState().mode, 'edit')
+  eq('Shift+Tab prevents the browser focus rotation', toEdit.defaultPrevented, true)
+  const shiftTabEvents = flushEvents(runtime2).filter((event) => event.type === 'mode-change')
+  eq('Shift+Tab announces one mode-change', shiftTabEvents.length, 1)
+  eq('Shift+Tab mode-change payload is edit', shiftTabEvents[0] && shiftTabEvents[0].mode, 'edit')
+  pressKey(document.body, { key: 'Tab', shiftKey: true })
+  eq('Shift+Tab switches edit back to annotate', runtime2.getState().mode, 'annotate')
+  flushEvents(runtime2)
+  runtime2.setMode('browse')
+  flushEvents(runtime2)
+  pressKey(document.body, { key: 'Tab', shiftKey: true })
+  eq('Shift+Tab from browse enters annotate', runtime2.getState().mode, 'annotate')
+  flushEvents(runtime2)
+
+  const inputShiftTab = pressKey(keyInput, { key: 'Tab', shiftKey: true })
+  eq('Shift+Tab inside an input leaves the mode alone', runtime2.getState().mode, 'annotate')
+  eq('ignored Shift+Tab does not preventDefault', inputShiftTab.defaultPrevented, false)
+  eq('ignored Shift+Tab announces nothing', flushEvents(runtime2).some((event) => event.type === 'mode-change'), false)
+  const plainTab = pressKey(document.body, { key: 'Tab' })
+  eq('plain Tab is left to the browser', runtime2.getState().mode, 'annotate')
+  eq('plain Tab does not preventDefault', plainTab.defaultPrevented, false)
+  flushEvents(runtime2)
+  pressKey(document.body, { code: 'Tab', shiftKey: true })
+  eq('Shift+Tab also matches the physical Tab code', runtime2.getState().mode, 'edit')
+  pressKey(document.body, { code: 'Tab', shiftKey: true })
+  eq('physical Shift+Tab toggles back to annotate', runtime2.getState().mode, 'annotate')
+  flushEvents(runtime2)
+
+  const escAnnotate = pressKey(document.body, { key: 'Escape' })
+  eq('ESC from annotate returns to browse', runtime2.getState().mode, 'browse')
+  eq('ESC prevents default when exiting a mode', escAnnotate.defaultPrevented, true)
+  const escaperEvents = flushEvents(runtime2).filter((event) => event.type === 'mode-change')
+  eq('ESC announces one mode-change', escaperEvents.length, 1)
+  eq('ESC mode-change payload is browse', escaperEvents[0] && escaperEvents[0].mode, 'browse')
+  const escBrowse = pressKey(document.body, { key: 'Escape' })
+  eq('ESC in browse does not preventDefault', escBrowse.defaultPrevented, false)
+  eq('ESC in browse announces nothing again', flushEvents(runtime2).some((event) => event.type === 'mode-change'), false)
+  runtime2.setMode('edit')
+  flushEvents(runtime2)
+  pressKey(document.body, { key: 'Escape' })
+  eq('ESC from edit returns to browse', runtime2.getState().mode, 'browse')
+  flushEvents(runtime2)
+
+  // Layering: design card -> popover -> drag -> mode.
+  runtime2.setMode('edit')
+  flushEvents(runtime2)
+  runtime2.setSelection('#hero')
+  dispatch(hero, new FakeEvent('click', { target: hero }))
+  ok('layering: design card open before ESC', !!document.querySelector('[data-dsh-nudge="design"]'))
+  const cardEscape = pressKey(document.body, { key: 'Escape' })
+  eq('layering: first ESC closes the design card', document.querySelector('[data-dsh-nudge="design"]'), null)
+  eq('layering: first ESC keeps edit mode', runtime2.getState().mode, 'edit')
+  eq('layering: first ESC is consumed', cardEscape.defaultPrevented, true)
+  flushEvents(runtime2)
+  pressKey(document.body, { key: 'Escape' })
+  eq('layering: second ESC leaves edit mode', runtime2.getState().mode, 'browse')
+  flushEvents(runtime2)
+
+  runtime2.setMode('annotate')
+  flushEvents(runtime2)
+  dispatch(button, new FakeEvent('click', { target: button }))
+  ok('layering: annotation popover open before ESC', !!document.querySelector('[data-dsh-nudge="popover"]'))
+  pressKey(document.body, { key: 'Escape' })
+  eq('layering: first ESC closes the annotation popover', document.querySelector('[data-dsh-nudge="popover"]'), null)
+  eq('layering: first ESC keeps annotate mode', runtime2.getState().mode, 'annotate')
+  flushEvents(runtime2)
+  pressKey(document.body, { key: 'Escape' })
+  eq('layering: second ESC leaves annotate mode', runtime2.getState().mode, 'browse')
+  flushEvents(runtime2)
+
+  runtime2.setMode('annotate')
+  flushEvents(runtime2)
+  dispatch(hero, new FakeEvent('mousedown', { target: hero, clientX: 30, clientY: 60 }))
+  pressKey(document.body, { key: 'Escape' })
+  eq('layering: drag-clear ESC keeps annotate mode', runtime2.getState().mode, 'annotate')
+  pressKey(document.body, { key: 'Escape' })
+  eq('layering: following ESC leaves annotate mode', runtime2.getState().mode, 'browse')
+  flushEvents(runtime2)
+
+
   section('destroy')
   runtime2.destroy()
   eq('namespace removed', sandbox.__DSH_NUDGE__, null)
   eq('overlay removed after destroy', document.querySelectorAll('[data-dsh-nudge-root]').length, 0)
   eq('listeners removed after destroy', listenerCount(document), 0)
   eq('window listeners removed after destroy', listenerCount(sandbox), 0)
+  eq('theme media listener released after destroy', themeMedia.listenerCount(), 0)
 
   process.stdout.write('\n' + checks + ' checks, ' + failures + ' failure(s)\n')
   if (failures > 0) {

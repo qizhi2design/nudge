@@ -16,6 +16,7 @@ var PLUGIN_CONFIG_DEFAULTS = Object.freeze({
   enableEdit: true,
   enableDomTree: true,
   enableWorkspaceVersions: true,
+  enableFloatingComposer: true,
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,

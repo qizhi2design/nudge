@@ -736,6 +736,147 @@ async function testTextSpanAcrossSourceLineBreak() {
   })
 }
 
+
+async function testRemoveElementFromMarkup() {
+  await withWorkspace(async (root) => {
+    await writeAt(
+      root,
+      'index.html',
+      '<!doctype html>\n<html>\n  <body>\n    <div id="list">\n      <span id="a" class="item">A</span>\n      <span id="b" class="item">B</span>\n      <span id="c" class="item">C</span>\n    </div>\n  </body>\n</html>\n',
+    )
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        { id: 'remove-1', kind: 'remove', selector: '#b', outerHTML: '<span id="b" class="item">B</span>', textSnippet: 'B' },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'remove: element removal synced')
+    assertEqual(out.results[0].strategy, 'html-remove', 'remove: strategy is html-remove')
+    assertEqual(out.results[0].file, 'index.html', 'remove: edited file reported')
+    assertEqual(out.results[0].line, 6, 'remove: line points at the removed element')
+    assertEqual(adapter.state.writes.length, 1, 'remove: one write')
+    const content = await readAt(root, 'index.html')
+    assert(!content.includes('id="b"'), 'remove: element and subtree removed')
+    assert(content.includes('<span id="a" class="item">A</span>'), 'remove: previous sibling kept')
+    assert(content.includes('<span id="c" class="item">C</span>'), 'remove: next sibling kept')
+    assertEqual(content.split('\n').length, 10, 'remove: the emptied line is gone, no blank gap left')
+
+    const protectedOut = await syncEdits(
+      makeDeps(root, adapter, [{ id: 'remove-2', kind: 'remove', selector: 'body', outerHTML: '<body></body>' }]),
+    )
+    assertEqual(protectedOut.results[0].status, 'preview', 'remove: protected element stays preview-only')
+    assertEqual(protectedOut.results[0].reason, 'protected-element', 'remove: reason is protected-element')
+    assertEqual(adapter.state.writes.length, 1, 'remove: protected edit writes nothing')
+
+    const missingOut = await syncEdits(
+      makeDeps(root, adapter, [{ id: 'remove-3', kind: 'remove', selector: '#missing', outerHTML: '' }]),
+    )
+    assertEqual(missingOut.results[0].status, 'preview', 'remove: unresolved element stays preview-only')
+    assertEqual(missingOut.results[0].reason, 'unresolved-element', 'remove: reason is unresolved-element')
+  })
+}
+
+async function testMoveElementInMarkup() {
+  const page =
+    '<!doctype html>\n<html>\n  <body>\n    <div id="list">\n      <span id="a" class="item">A</span>\n      <span id="b" class="item">B</span>\n      <span id="c" class="item">C</span>\n    </div>\n    <div id="panel">\n      <p id="p1">Panel</p>\n    </div>\n  </body>\n</html>\n'
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', page)
+    const adapter = createAdapter()
+
+    const reorder = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-1',
+          kind: 'move',
+          selector: '#c',
+          outerHTML: '<span id="c" class="item">C</span>',
+          textSnippet: 'C',
+          targetParentSelector: '#list',
+          targetParentOuterHTML: '<div id="list"></div>',
+          beforeSelector: '#a',
+          beforeOuterHTML: '<span id="a" class="item">A</span>',
+        },
+      ]),
+    )
+    assertEqual(reorder.results[0].status, 'synced', 'move: sibling reorder synced')
+    assertEqual(reorder.results[0].strategy, 'html-move', 'move: strategy is html-move')
+    const reordered = await readAt(root, 'index.html')
+    assertEqual(countOccurrences(reordered, '<span'), 3, 'move: no element duplicated or lost')
+    assert(
+      reordered.indexOf('<span id="c"') < reordered.indexOf('<span id="a"') && reordered.indexOf('<span id="a"') < reordered.indexOf('<span id="b"'),
+      'move: C now precedes A and B',
+    )
+    assert(reordered.includes('      <span id="c" class="item">C</span>\n      <span id="a"'), 'move: indentation preserved at the destination')
+
+    const nest = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-2',
+          kind: 'move',
+          selector: '#a',
+          outerHTML: '<span id="a" class="item">A</span>',
+          targetParentSelector: '#panel',
+          targetParentOuterHTML: '<div id="panel"><p id="p1">Panel</p></div>',
+          beforeSelector: null,
+        },
+      ]),
+    )
+    assertEqual(nest.results[0].status, 'synced', 'move: re-parenting synced')
+    const nested = await readAt(root, 'index.html')
+    assert(/<div id="panel">\n\s*<p id="p1">Panel<\/p>\n\s*<span id="a" class="item">A<\/span>\n\s*<\/div>/.test(nested), 'move: appended as the last child of the new parent')
+    assert(!/id="list">[\s\S]*id="a"/.test(nested.slice(nested.indexOf('id="list"'), nested.indexOf('</div>', nested.indexOf('id="list"')))), 'move: element left the old parent')
+
+    const writeCount = adapter.state.writes.length
+    const cycle = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-3',
+          kind: 'move',
+          selector: '#panel',
+          outerHTML: '<div id="panel"></div>',
+          targetParentSelector: '#p1',
+          targetParentOuterHTML: '<p id="p1">Panel</p>',
+        },
+      ]),
+    )
+    assertEqual(cycle.results[0].status, 'preview', 'move: moving an element into itself stays preview-only')
+    assertEqual(cycle.results[0].reason, 'invalid-move-target', 'move: reason is invalid-move-target')
+    assertEqual(adapter.state.writes.length, writeCount, 'move: refused move writes nothing')
+
+    const orphan = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-4',
+          kind: 'move',
+          selector: '#b',
+          outerHTML: '<span id="b" class="item">B</span>',
+          targetParentSelector: '#nowhere',
+          targetParentOuterHTML: '',
+        },
+      ]),
+    )
+    assertEqual(orphan.results[0].status, 'preview', 'move: missing destination parent stays preview-only')
+    assertEqual(orphan.results[0].reason, 'unresolved-target-parent', 'move: reason is unresolved-target-parent')
+
+    const noop = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-5',
+          kind: 'move',
+          selector: '#a',
+          outerHTML: '<span id="a" class="item">A</span>',
+          targetParentSelector: '#panel',
+          targetParentOuterHTML: '<div id="panel"></div>',
+          beforeSelector: null,
+        },
+      ]),
+    )
+    assertEqual(noop.results[0].status, 'synced', 'move: appending the last child reports synced')
+    assertEqual(noop.results[0].strategy, 'no-op', 'move: appending the last child is a no-op')
+    assertEqual(adapter.state.writes.length, writeCount, 'move: no-op performs no write')
+  })
+}
+
 // ----------------------------------------------------------------- runner
 
 const tests = [
@@ -762,6 +903,8 @@ const tests = [
   ['served asset resolved by unique basename', testServedAssetResolvedByUniqueBasename],
   ['pure insertion into a text node', testPureInsertionTextEdit],
   ['text span across a source line break', testTextSpanAcrossSourceLineBreak],
+  ['remove element (subtree) from markup', testRemoveElementFromMarkup],
+  ['move element (reorder / re-parent) in markup', testMoveElementInMarkup],
 ]
 
 let caseCount = 0

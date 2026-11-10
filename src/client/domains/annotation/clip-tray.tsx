@@ -280,6 +280,17 @@ function ClipAnnotationTray(props) {
   var theme = useDshTheme(props.ctx);
   var sessionId = props.sessionId || '';
   var entry = useClipEntry(sessionId);
+  // Safety net: the composer's send path is Session-scoped, so make sure this
+  // Session's sendSession is wrapped whenever the tray still holds cards
+  // (initial mount, HMR remount, session rebind). `installClipSendForSession`
+  // validates the current wrapper, republishes the newest dispatcher and
+  // retries a few times when the Session scope is not resolvable yet.
+  React.useEffect(function () {
+    if (sessionId === '' || entry.clips.length === 0) return undefined;
+    clientDebugLog('tray.pending', { sessionId: sessionId, clips: entry.clips.length, ops: entry.ops.length });
+    installClipSendForSession(props.ctx, sessionId);
+    return undefined;
+  }, [sessionId, entry.clips.length]);
   var editingState = React.useState(null);
   var editing = editingState[0];
   var setEditing = editingState[1];

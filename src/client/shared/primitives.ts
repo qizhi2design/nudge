@@ -25,6 +25,7 @@ var Icon = {
   reload: lucideIcon(VI_ICONS.RotateCw),
   refresh: lucideIcon(VI_ICONS.RefreshCw),
   globe: lucideIcon(VI_ICONS.Globe),
+  nudge: lucideIcon(VI_ICONS.NudgeMark),
   external: lucideIcon(VI_ICONS.ArrowUpRight),
   cursor: lucideIcon(VI_ICONS.MousePointer2),
   annotate: lucideIcon(VI_ICONS.MessageSquarePlus),
@@ -136,6 +137,42 @@ function ensureGlobalStyles() {
     '[data-dsh-nudge-root] input[type=range]{height:20px}' +
     '[data-dsh-nudge-root] ::-webkit-scrollbar{width:8px;height:8px}' +
     '[data-dsh-nudge-root] ::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2, #3a4150);border-radius:999px}' +
+    // Fullscreen floating conversation: the host column keeps the native chat
+    // and is docked to the bottom edge above the fullscreen right-Sidebar
+    // panel. Only the marker set by domains/composer/floating.ts matches these
+    // rules, so normal split layouts and other plugins' fullscreen panels are
+    // untouched. The surface is a bottom dock, not a floating window: no shadow,
+    // no header chrome, only rounded top corners and a hairline top border.
+    '[data-dsh-nudge-floating-chat]{position:absolute!important;grid-area:auto!important;margin:0!important;left:calc(50% - min(440px, calc(50% - 32px)))!important;top:auto!important;right:auto!important;bottom:0!important;transform:none!important;width:min(880px, calc(100% - 64px))!important;height:min(640px, 70%)!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;z-index:50!important;display:flex!important;flex-direction:column;overflow:hidden!important;background:var(--dsw-alias-bg-base,#fff)!important;border:.5px solid var(--dsw-alias-border-l3,#ddd)!important;border-bottom:0!important;border-radius:14px 14px 0 0!important;box-shadow:none!important}' +
+    // The host header carries the application window drag region and traffic
+    // light spacing; a docked surface shows only the conversation itself.
+    '[data-dsh-nudge-floating-chat] header{display:none!important}' +
+    '[data-dsh-nudge-floating-chat] [data-width-handle]{display:none!important}' +
+    '[data-dsh-nudge-floating-chat] [data-conversation-scroll]{margin-right:0!important;scrollbar-gutter:auto!important}' +
+    '[data-dsh-nudge-floating-chat]>:not(header){flex:1 1 auto;min-height:0}' +
+    // Compact presentation: only the native composer stays visible, docked to
+    // the bottom edge and centred. Height follows the measured composer seat so
+    // attachments and multi-line drafts grow the bar instead of clipping it.
+    '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact]{height:var(--dsh-nudge-float-compact-height,64px)!important;width:min(760px, calc(100% - 64px))!important;left:calc(50% - min(380px, calc(50% - 32px)))!important;border-radius:16px 16px 0 0!important}' +
+    '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact] [data-conversation-scroll]{overflow:hidden!important}' +
+    '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact] [data-conversation-scroll]>:not([data-composer-seat]){display:none!important}' +
+    // Controls: an icon inside the expanded dock collapses it to a small
+    // floating button; that button restores the expanded dock.
+    '[data-dsh-nudge-float-collapse]{position:fixed!important;z-index:55!important;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:.5px solid var(--dsw-alias-border-l3,#ddd);border-radius:8px;background:var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff));color:var(--dsw-alias-label-primary, #111);cursor:pointer;box-shadow:0 2px 8px #0002}' +
+    '[data-dsh-nudge-float-collapse]:hover{background:var(--dsw-alias-button-floating-hover, var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff)))}' +
+    '[data-dsh-nudge-float-collapse] svg{width:16px;height:16px}' +
+    // The restore button floats over the *inspected page*, which can be light
+    // while the host theme is dark. Its hover fill must stay opaque: the generic
+    // `--dsw-alias-interactive-bg-hover` token is a translucent tint (white 8%
+    // in dark theme), so using it here replaced the dark base and turned the
+    // button into a washed-out translucent patch with a light icon on a light
+    // page. The floating-button fill/hover pair is opaque in both themes.
+    '[data-dsh-nudge-float-button]{position:fixed!important;right:20px!important;bottom:20px!important;z-index:60!important;width:46px!important;height:46px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;padding:0!important;border:.5px solid var(--dsw-alias-border-l3,#ddd)!important;border-radius:999px!important;background-color:var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff))!important;color:var(--dsw-alias-label-primary,#111)!important;box-shadow:0 8px 24px #0003!important;cursor:pointer!important;transition:background-color 120ms ease, border-color 120ms ease}' +
+    '[data-dsh-nudge-float-button]:hover{background-color:var(--dsw-alias-button-floating-hover, var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff)))!important;border-color:var(--dsw-alias-border-l4, var(--dsw-alias-border-l3, #ddd))!important}' +
+    '[data-dsh-nudge-float-button]:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary, #4f8cff);outline-offset:2px}' +
+    '[data-dsh-nudge-float-button] svg{width:20px;height:20px}' +
+    '[data-dsh-nudge-float-collapse][hidden],[data-dsh-nudge-float-button][hidden]{display:none!important}' +
+    '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=hidden]{display:none!important}' +
     (typeof NUDGE_UI_CSS === 'string' ? NUDGE_UI_CSS : '');
   var existing = document.getElementById(GLOBAL_CSS_TAG);
   if (existing) {

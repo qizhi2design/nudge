@@ -20,7 +20,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, normalize, posix, sep, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -42,6 +43,49 @@ const REMOTE_NAMESPACE = 'nudge'
 /** Prefix on every remote failure message so the UI can attribute it. */
 const ERROR_PREFIX = 'nudge: '
 
+/** Bounds of the opt-in Client diagnostics log (one JSONL line per record). */
+const CLIENT_DEBUG_LOG_MAX_BYTES = 1_000_000
+const CLIENT_DEBUG_LOG_LINE_MAX = 16_384
+
+/**
+ * Append one Client diagnostics record to `~/.dsh/nudge/client-debug.log`.
+ *
+ * The log lives outside the workspace on purpose: it is developer-facing
+ * evidence for HMR/send-hook decisions, never a user artifact. It is bounded
+ * (one rotation) and every failure is swallowed — a broken diagnostics sink
+ * must not be able to affect the composer's send path.
+ */
+async function appendClientDebugLog(entry) {
+  try {
+    const text = typeof entry === 'string' ? entry : JSON.stringify(entry)
+    if (typeof text !== 'string' || text.length === 0) return false
+    if (text.length > CLIENT_DEBUG_LOG_LINE_MAX) return false
+    // JSON.stringify escapes newlines; a raw one would corrupt the JSONL framing.
+    if (text.includes('\n') || text.includes('\r')) return false
+    const directory = join(homedir(), '.dsh', 'nudge')
+    const file = join(directory, 'client-debug.log')
+    await mkdir(directory, { recursive: true })
+    let size = 0
+    try {
+      const info = await stat(file)
+      size = typeof info?.size === 'number' ? info.size : 0
+    } catch {
+      size = 0
+    }
+    if (size > CLIENT_DEBUG_LOG_MAX_BYTES) {
+      try {
+        await rename(file, file + '.1')
+      } catch {
+        /* another writer rotated it first: keep appending */
+      }
+    }
+    await appendFile(file, text + '\n', 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * Defaults for the Loader row's config.
  *
@@ -57,6 +101,7 @@ const DEFAULT_CONFIG = Object.freeze({
   enableEdit: true,
   enableDomTree: true,
   enableWorkspaceVersions: true,
+  enableFloatingComposer: true,
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,
@@ -97,6 +142,10 @@ Config.dict = {
   enableWorkspaceVersions: nativeConfigNode('boolean', {
     default: DEFAULT_CONFIG.enableWorkspaceVersions,
     description: 'Show the workspace versions / git commit dock in the Nudge toolbar.',
+  }),
+  enableFloatingComposer: nativeConfigNode('boolean', {
+    default: DEFAULT_CONFIG.enableFloatingComposer,
+    description: 'Keep the conversation composer floating above the right Sidebar while a Nudge tab is fullscreen.',
   }),
   enableHotReload: nativeConfigNode('boolean', {
     default: DEFAULT_CONFIG.enableHotReload,
@@ -161,6 +210,7 @@ function normalizeConfig(value) {
     enableEdit: bool(raw.enableEdit, DEFAULT_CONFIG.enableEdit),
     enableDomTree: bool(raw.enableDomTree, DEFAULT_CONFIG.enableDomTree),
     enableWorkspaceVersions: bool(raw.enableWorkspaceVersions, DEFAULT_CONFIG.enableWorkspaceVersions),
+    enableFloatingComposer: bool(raw.enableFloatingComposer, DEFAULT_CONFIG.enableFloatingComposer),
     enableHotReload: bool(raw.enableHotReload, DEFAULT_CONFIG.enableHotReload),
     contextMenuLink: bool(raw.contextMenuLink, DEFAULT_CONFIG.contextMenuLink),
     contextMenuTab: bool(raw.contextMenuTab, DEFAULT_CONFIG.contextMenuTab),
@@ -178,6 +228,7 @@ const SETTINGS_FIELDS = Object.freeze([
   'enableEdit',
   'enableDomTree',
   'enableWorkspaceVersions',
+  'enableFloatingComposer',
   'enableHotReload',
   'contextMenuLink',
   'contextMenuTab',
@@ -463,6 +514,16 @@ export function apply(ctx, rawConfig) {
     /** Liveness probe used by the panel's connection pill. */
     async ping() {
       return { ok: true, version: '0.1.0' }
+    },
+
+    /**
+     * Client diagnostics sink: append one JSONL record to
+     * `~/.dsh/nudge/client-debug.log`. Never throws, so no diagnostics failure
+     * can leak into the composer's send path.
+     */
+    async debugLog(entry) {
+      const saved = await appendClientDebugLog(entry)
+      return { saved }
     },
 
     /**
@@ -764,6 +825,7 @@ export function apply(ctx, rawConfig) {
     model: { services: [], events: [], objects: [] },
     invocations: [
       remoteInvocation('ping', []),
+      remoteInvocation('debugLog', ['entry']),
       remoteInvocation('config', []),
       remoteInvocation('configUpdate', ['patch']),
       remoteInvocation('about', ['check']),

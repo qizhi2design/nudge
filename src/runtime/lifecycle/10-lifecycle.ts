@@ -67,10 +67,14 @@
 			try {
 				rafUsesTimeout ? (win.clearTimeout || clearTimeout)(rafId) : typeof win.cancelAnimationFrame == 'function' && win.cancelAnimationFrame(rafId)
 			} catch {}
+		unwatchThemeMedia()
 		;((rafId = 0), (frameQueued = !1), closeDesignCard(!1), closePopover(), removeNode(root), unpatchHistory(), (root = null), (layer = null), (parts = null))
 	}
 	function resetState() {
-		;((mode = 'browse'),
+		;((themeDarkExplicit = !1),
+			(themeMedia = null),
+			(themeMediaHandler = null),
+			(mode = 'browse'),
 			(selectionEl = null),
 			(selectionSelector = ''),
 			(hoverEl = null),
@@ -122,7 +126,7 @@
 			listen(win, 'hashchange', checkPageInfo, !1))
 	}
 	function boot() {
-		;(attachListeners(), startObserver(), patchHistory(), (lastUrl = locationHref()), (lastPageTitle = pageTitle()), queueEvent('page-info', { url: lastUrl, title: lastPageTitle }))
+		;(attachListeners(), startObserver(), patchHistory(), watchThemeMedia(), (lastUrl = locationHref()), (lastPageTitle = pageTitle()), queueEvent('page-info', { url: lastUrl, title: lastPageTitle }))
 	}
 	function reinit() {
 		return (teardown(), resetState(), boot(), !0)

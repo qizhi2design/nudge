@@ -61,7 +61,10 @@
 			designNoDirectText: typeof source.designNoDirectText == 'string' ? source.designNoDirectText : DEFAULT_LOCALE.designNoDirectText,
 			designAncestors: typeof source.designAncestors == 'string' ? source.designAncestors : DEFAULT_LOCALE.designAncestors,
 			designDescendants: typeof source.designDescendants == 'string' ? source.designDescendants : DEFAULT_LOCALE.designDescendants,
-			designNoDescendants: typeof source.designNoDescendants == 'string' ? source.designNoDescendants : DEFAULT_LOCALE.designNoDescendants
+			designNoDescendants: typeof source.designNoDescendants == 'string' ? source.designNoDescendants : DEFAULT_LOCALE.designNoDescendants,
+			designDelete: typeof source.designDelete == 'string' ? source.designDelete : DEFAULT_LOCALE.designDelete,
+			designDeleteHint: typeof source.designDeleteHint == 'string' ? source.designDeleteHint : DEFAULT_LOCALE.designDeleteHint,
+			designMoveHint: typeof source.designMoveHint == 'string' ? source.designMoveHint : DEFAULT_LOCALE.designMoveHint
 		}
 	}
 	function annotationAccentColor() {
@@ -70,16 +73,70 @@
 	function annotationMarkerColor() {
 		return theme.annotationMarker || '#339cff'
 	}
+	/** The live prefers-color-scheme media query, when the host page exposes one. */
+	function themeMediaQuery() {
+		try {
+			return win && typeof win.matchMedia == 'function' ? win.matchMedia('(prefers-color-scheme: dark)') : null
+		} catch {
+			return null
+		}
+	}
+	/**
+	 * True when the overlay should paint dark. An explicit host flag wins; until
+	 * the host sends one, the OS/browser color-scheme preference is the fallback,
+	 * so a dark host never starts with a white injected bar.
+	 */
+	function effectiveDark() {
+		if (themeDarkExplicit) return theme.isDark === true
+		var media = themeMediaQuery()
+		if (media) return media.matches === true
+		return theme.isDark === true
+	}
+	function onThemeMediaChange() {
+		restyleOverlay()
+		if (popover) {
+			applyPopoverTheme()
+			applyPopoverLocale()
+			positionPopover()
+		}
+		updateVisuals()
+		scheduleFrame()
+	}
+	/** Follow OS dark-mode changes while the host has not sent an explicit flag. */
+	function watchThemeMedia() {
+		unwatchThemeMedia()
+		var media = themeMediaQuery()
+		if (!media) return
+		themeMedia = media
+		themeMediaHandler = function () {
+			onThemeMediaChange()
+		}
+		try {
+			if (typeof media.addEventListener == 'function') media.addEventListener('change', themeMediaHandler)
+			else if (typeof media.addListener == 'function') media.addListener(themeMediaHandler)
+			else themeMediaHandler = null
+		} catch {
+			themeMediaHandler = null
+		}
+	}
+	function unwatchThemeMedia() {
+		if (themeMedia && themeMediaHandler)
+			try {
+				if (typeof themeMedia.removeEventListener == 'function') themeMedia.removeEventListener('change', themeMediaHandler)
+				else if (typeof themeMedia.removeListener == 'function') themeMedia.removeListener(themeMediaHandler)
+			} catch {}
+		;((themeMedia = null), (themeMediaHandler = null))
+	}
 	/**
 	 * The page overlay's own surface palette. It follows the host DSH light/dark
-	 * flag (`setTheme` ships `isDark`), but keeps the Codex token set instead of
-	 * the host UI tokens so the injected layer stays readable on any page.
-	 * Always read this at render time; never cache it across `setTheme`.
+	 * flag (setTheme ships isDark), but keeps the Codex token set instead of the
+	 * host UI tokens so the injected layer stays readable on any page. Always read
+	 * this at render time; never cache it across setTheme.
 	 */
 	function overlayPalette() {
-		return theme.isDark === true ? OVERLAY_DARK : OVERLAY_LIGHT
+		return effectiveDark() ? OVERLAY_DARK : OVERLAY_LIGHT
 	}
 	/** Placeholder ink for the composer textarea, keyed to the overlay surface. */
 	function overlayPlaceholderColor() {
-		return theme.isDark === true ? 'rgba(255,255,255,0.42)' : 'rgba(15,17,21,0.50)'
+		return effectiveDark() ? 'rgba(255,255,255,0.42)' : 'rgba(15,17,21,0.50)'
 	}

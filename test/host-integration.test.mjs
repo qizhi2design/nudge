@@ -206,7 +206,7 @@ const api = state.provided && state.provided.service
 assert(api !== null && typeof api === 'object', 'apply provides the nudge service')
 assert(state.provided.name === 'nudge', 'service namespace is nudge')
 assert(state.typert && Array.isArray(state.typert.invocations), 'typert contribution registered')
-assert(state.typert.invocations.length === 15, 'fifteen remote invocations registered')
+assert(state.typert.invocations.length === 16, 'sixteen remote invocations registered')
 
 const facts = await api.session('session-1')
 assert(facts.cwd === workspace, 'session endpoint resolves the workspace cwd')
@@ -221,7 +221,7 @@ assert(readOnlySnapshot.values.enableAnnotate === true, 'config snapshot reports
 assert(!Object.prototype.hasOwnProperty.call(readOnlySnapshot.values, 'sourceRoot'), 'settings snapshot hides the internal mapping fields')
 assert(
   Object.keys(readOnlySnapshot.defaults).sort().join(',') ===
-    ['contextMenuLink', 'contextMenuTab', 'enableAnnotate', 'enableDomTree', 'enableEdit', 'enableHotReload', 'enableWorkspaceVersions', 'language'].sort().join(','),
+    ['contextMenuLink', 'contextMenuTab', 'enableAnnotate', 'enableDomTree', 'enableEdit', 'enableFloatingComposer', 'enableHotReload', 'enableWorkspaceVersions', 'language'].sort().join(','),
   'config snapshot reports the product defaults',
 )
 

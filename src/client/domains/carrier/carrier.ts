@@ -50,6 +50,8 @@ function createCarrier(options) {
   var pendingUrl = null;
   var runtimeReady = false;
   var lastUrl = '';
+  var bottomInset = 0;
+  var barHosted = false;
   var theme = options.theme || readTheme();
   var localeStrings = options.localeStrings || {};
   var listeners = [];
@@ -277,6 +279,9 @@ function createCarrier(options) {
       designAncestors: pick('designAncestors', 'Ancestors'),
       designDescendants: pick('designDescendants', 'Children'),
       designNoDescendants: pick('designNoDescendants', 'No child elements'),
+      designDelete: pick('designDelete', 'Delete element'),
+      designDeleteHint: pick('designDeleteHint', 'Remove this element and its subtree'),
+      designMoveHint: pick('designMoveHint', 'Drag to reorder or nest'),
     };
   }
 
@@ -288,6 +293,8 @@ function createCarrier(options) {
       '(function(){try{var r=window.__DSH_NUDGE__;if(!r)return false;' +
         'r.setLocale(' + JSON.stringify(strings) + ');' +
         'r.setTheme(' + JSON.stringify(palette) + ');' +
+        'r.setBottomInset(' + bottomInset + ');' +
+        'r.setBarHosted(' + (barHosted ? 'true' : 'false') + ');' +
         'return true;}catch(e){return false;}})()',
     );
   }
@@ -436,6 +443,54 @@ function createCarrier(options) {
     setMode: function (mode) {
       if (!runtimeReady) return Promise.resolve(null);
       return runtimeCommand('r.setMode(' + JSON.stringify(mode) + ')');
+    },
+    /**
+     * Reserved host strip (the floating composer dock) measured from the page
+     * bottom. The runtime clamps its own floating UI above it. The value is
+     * remembered so a page reload re-applies it through applyRuntimePreferences.
+     */
+    setBottomInset: function (inset) {
+      var next = Number(inset);
+      if (!isFinite(next) || next < 0) next = 0;
+      next = Math.min(400, Math.round(next));
+      if (next === bottomInset) return Promise.resolve(true);
+      bottomInset = next;
+      if (!runtimeReady) return Promise.resolve(true);
+      return runtimeCommand('r.setBottomInset(' + bottomInset + ')');
+    },
+    /**
+     * Host-side annotation bar: the floating composer dock is a host layer above
+     * the webview, so in fullscreen the page's own bar cannot paint over the
+     * input box. The host renders the bar and hides the in-page one.
+     */
+    setBarHosted: function (hosted) {
+      barHosted = hosted === true;
+      if (!runtimeReady) return Promise.resolve(true);
+      return runtimeCommand('r.setBarHosted(' + (barHosted ? 'true' : 'false') + ')');
+    },
+    getBarState: function () {
+      if (!runtimeReady) return Promise.resolve(null);
+      return runtimeJson('r.getBarState()');
+    },
+    toggleMarkers: function () {
+      if (!runtimeReady) return Promise.resolve(null);
+      return runtimeJson('r.toggleMarkers()');
+    },
+    discardAnnotations: function () {
+      if (!runtimeReady) return Promise.resolve(false);
+      return runtimeCommand('r.discardAnnotations()');
+    },
+    sendAnnotations: function () {
+      if (!runtimeReady) return Promise.resolve(false);
+      return runtimeCommand('r.sendAnnotations()');
+    },
+    exitAnnotate: function () {
+      if (!runtimeReady) return Promise.resolve(false);
+      return runtimeCommand('r.exitAnnotate()');
+    },
+    locateLastAnnotation: function () {
+      if (!runtimeReady) return Promise.resolve(false);
+      return runtimeCommand('r.locateLastAnnotation()');
     },
     drainEvents: function () {
       if (!runtimeReady) return Promise.resolve([]);

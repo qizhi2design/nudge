@@ -112,6 +112,7 @@ function NudgeWorkspacePanel(props) {
   var t = props.t;
   var theme = props.theme;
   var sessionId = props.sessionId || '';
+  var refreshToken = typeof props.refreshToken === 'number' ? props.refreshToken : 0;
   var h = React.createElement;
 
   var remoteRef = React.useRef(null);
@@ -213,6 +214,18 @@ function NudgeWorkspacePanel(props) {
       loadWorkspace(false);
     },
     [loadWorkspace],
+  );
+
+  // The inspector body bumps `refreshToken` after a successful source write.
+  // Reload silently so the files / commit tabs reflect the new git state.
+  var syncRefreshRef = React.useRef(refreshToken);
+  React.useEffect(
+    function () {
+      if (refreshToken === syncRefreshRef.current) return;
+      syncRefreshRef.current = refreshToken;
+      if (refreshToken > 0) loadWorkspace(true);
+    },
+    [refreshToken, loadWorkspace],
   );
 
   var files = workspaceFiles(snapshot);

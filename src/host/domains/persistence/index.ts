@@ -8,7 +8,7 @@
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { READ_LIMIT, DEFAULT_SCAN_LIMIT } from './constants.js'
-import { applyMarkupTextEdit, applyMarkupAttrEdit } from './edits/markup.js'
+import { applyMarkupTextEdit, applyMarkupAttrEdit, applyMarkupRemoveEdit, applyMarkupMoveEdit } from './edits/markup.js'
 import { applyCssRuleEdit, applyHtmlOverrideEdit, applyTemplateStyleEdit } from './edits/style.js'
 import { derivePageMapping, hintToRelativePath, resolveSourceFile, resolveFileUnderRoot, tooLargeFailure } from './planning/mapping.js'
 import { searchForEdit, findBasenameCandidates, inspectSearchTarget } from './planning/search.js'
@@ -436,6 +436,10 @@ export function applyEditToContent(content, item) {
       return applyMarkupTextEdit(content, item.edit)
     case 'html-attr':
       return applyMarkupAttrEdit(content, item.edit)
+    case 'html-remove':
+      return applyMarkupRemoveEdit(content, item.edit)
+    case 'html-move':
+      return applyMarkupMoveEdit(content, item.edit)
     default:
       return { ok: false, reason: 'unsupported-source-type' }
   }

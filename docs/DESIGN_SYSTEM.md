@@ -66,6 +66,10 @@ comment ──[Esc / ×]──> browse
 
 宿主只负责地址栏、标注 / 编辑开关、撤销重做；页面内浮层使用与 `isDark` 对应的 Codex 表面（见 2.1），两套 palette 由宿主通过 `setTheme(palette)` 推入注入层——因此宿主工具栏与页面浮层始终同时跟随 DSH 主题，而不是各自独立换肤。
 
+宿主工具栏固定两行：第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往，38px），第二行是轻推操作栏（标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 外部，34px）。两行都用 `--dsw-alias-bg-base` + `.5px` 分隔线，按钮 28px、圆角 `--dsw-radius-sm`，与 DSH 内置 Browser 工具栏一致；<460px 时第二行标签收成图标，<430px 时第一行收起前进与「前往」。Tab 标题注册 `sidebar.right.pane.tab.title`，用 `currentColor` 的轻推标记（`NudgeMark`）加标题，与内置 Browser chip 的「图标 + 标题」结构一致。
+
+浏览器引导卡片的「打开浏览器 / 在轻推中打开」子菜单使用 DSH 菜单表面：`--dsw-specific-menu` + `--dsw-menu-backdrop-filter` + `--dsw-elevation-prominent`，容器 `--dsw-radius-lg`、`4px` 内边距，行高 40px、圆角 `--dsw-radius-md`、hover 用 `--dsw-alias-interactive-bg-hover`；不再使用 `--dsw-alias-bg-overlay`（那是遮罩色，不是菜单表面）。
+
 ## 3. 组件规范
 
 | 组件 | 落点 | 规则 |
@@ -74,6 +78,9 @@ comment ──[Esc / ×]──> browse
 | `IconButton` | 宿主工具栏 | 28×28，圆角 6，hover 用 `theme.layer2` |
 | `TextButton` | 宿主补充入口 | 主按钮使用 DSH primary，次按钮透明 |
 | `DomTreePanel` | 宿主 Client | 页面右侧 272px 侧边栏；懒加载 DOM 树、选中高亮、点节点聚焦（`focusDomPath`）；工具栏 ListTree 开关 |
+| `ShortcutKeys` / `Keycap` | 宿主工具栏 / 快捷键表 / 交互 tooltip | 键帽尺寸 18–20px、圆角 6px、`.5px` 边框、`--dsw-alias-bg-module-platform` 表面；⌘ / ⌥ / ⇧ / Space 用 lucide 图标（`Command` / `Option` / `ArrowBigUp` / `Space` / `CornerDownLeft`），Ctrl、字母、标点保留文本；顺序与 DSH 快捷键面板一致（control → alt → shift → meta） |
+| `ShortcutSheet` | 工具栏底部 | 键盘按钮展开的当前生效键位表：普通行 24px、标签左对齐、键帽右对齐，只读 Space 行单独分组；展开时撑高工具栏而不是覆盖 webview |
+| `ModeHintContent` | 标注 / 编辑按钮的 hover tooltip | 两行居中提示：点击 / 拖拽说明 +「按住 Space 临时操作网页」，Space 用 lucide 键帽；不再有工具栏下方的常驻通知条。tooltip 由宿主自绘 fixed 卡片（不是 Radix popper），因为 DSH Electron 渲染器里 portalled popper 会停在 `translate(0,-200%)` 屏外；卡片优先出现在 toolbar 上方，空间不足时贴顶显示，若超出 220px 内部滚动。卡片配色跟随宿主主题：Light 用 `--dsw-alias-bg-overlay`（#e9ecf2）+ `--dsw-alias-label-primary` 深色文字，Dark 用 `--dsw-alias-tooltip-bg`（#2c2c2e）+ 浅色文字；边框/阴影同步切换，keycap 仍用 `--dsw-alias-bg-module-platform` / `--dsw-alias-label-secondary` |
 | `Composer` | 页面运行时 | 24px 胶囊（Light / Dark 两套表面）：输入、取消、提交；不再含样式入口；图标取自 Lucide（X / Check）；Enter 发送 / Shift+Enter 换行 |
 | `DesignCard` | 页面运行时 | 22px 卡片（Light / Dark 两套表面）；可折叠分组（默认展开文本内容 + 文字样式，其余布局/间距/外观/高级折叠）；含文本内容与文字样式编辑，不含属性编辑；取消回滚 / 完成保留；主题翻转时关闭并按新 palette 重建 |
 | `BottomBar` | 页面运行时 | 「正在批注 · N」+ 拖拽手柄 + 定位 / 隐藏标记 / 丢弃 + 发送 + 退出；图标全部取自 Lucide；主题翻转时 `applyBarTheme()` 就地换色 |

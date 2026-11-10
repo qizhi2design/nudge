@@ -20,11 +20,16 @@ export function strategyFor(kind, ext) {
     if (MARKUP_EXTENSIONS.has(ext)) return kind === 'text' ? 'html-text' : 'html-attr'
     return null
   }
+  if (kind === 'remove' || kind === 'move') {
+    if (MARKUP_EXTENSIONS.has(ext)) return kind === 'remove' ? 'html-remove' : 'html-move'
+    return null
+  }
   return null
 }
 
 export function normalizeKind(value) {
   if (value === 'style' || value === 'text' || value === 'attr') return value
+  if (value === 'remove' || value === 'move') return value
   return null
 }
 
@@ -41,6 +46,16 @@ export function validateEditShape(kind, edit) {
     if (typeof edit.attrName !== 'string' || edit.attrName.trim() === '') return false
     if (edit.attrAfter === null) return true
     return typeof edit.attrAfter === 'string'
+  }
+  if (kind === 'remove') return true
+  if (kind === 'move') {
+    // Both endpoints must be identifiable in the same markup file: the source
+    // element is located through the shared selector/outerHTML contract and the
+    // destination parent needs its own selector. A null/absent `beforeSelector`
+    // means "append as the last child".
+    if (typeof edit.targetParentSelector !== 'string' || edit.targetParentSelector.trim() === '') return false
+    if (edit.beforeSelector === undefined || edit.beforeSelector === null) return true
+    return typeof edit.beforeSelector === 'string' && edit.beforeSelector.trim() !== ''
   }
   return false
 }

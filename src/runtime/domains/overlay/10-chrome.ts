@@ -84,7 +84,11 @@
 			cursor: 'pointer',
 			margin: '0px'
 		})
-		button.appendChild(overlayIcon(iconName, size || 15))
+		var icon = overlayIcon(iconName, size || 15)
+		try {
+			icon.style.setProperty('display', 'block')
+		} catch {}
+		button.appendChild(icon)
 		button.addEventListener('mouseenter', function () {
 			try {
 				var palette = overlayPalette()
@@ -134,7 +138,7 @@
 		if (passthrough === value) return !0
 		passthrough = value
 		if (value) {
-			;((hoverEl = null), (drag = null), parts && parts.marquee && hidePart(parts.marquee), removeCursorStyle(), hidePart(parts && parts.cursor), hidePart(parts && parts.meta))
+			;((hoverEl = null), (drag = null), parts && parts.marquee && hidePart(parts.marquee), parts && parts.drop && hidePart(parts.drop), removeCursorStyle(), hidePart(parts && parts.cursor), hidePart(parts && parts.meta))
 		}
 		try {
 			root && root.setAttribute(PASSTHROUGH_ATTR, value ? 'true' : 'false')
@@ -170,6 +174,7 @@
 			'[data-dsh-nudge="popover"]{animation:dshViPopIn 180ms cubic-bezier(0.23,1,0.32,1);transform-origin:top left}' +
 			'[data-dsh-nudge="popover"] textarea{outline:none}' +
 			'[data-dsh-nudge="popover"] textarea:focus{border-color:transparent}' +
+			'[data-dsh-nudge="bar"] svg,[data-dsh-nudge="popover"] svg,[data-dsh-nudge="design"] svg{display:block}' +
 			'[data-dsh-nudge="popover"] textarea::placeholder{color:' + overlayPlaceholderColor() + '}' +
 			'@media(prefers-reduced-motion:reduce){[data-dsh-nudge="popover"]{animation:none}[data-dsh-nudge="hover"],[data-dsh-nudge="badge"],[data-dsh-nudge="draft"]{transition:none!important}}'
 	}
@@ -186,7 +191,23 @@
 		} catch {}
 	}
 	/**
-	 * Idempotent restyle of the bottom annotate bar (built once in `createOverlay`,
+	 * Enabled/disabled send pill, expressed with palette tokens only. The disabled
+	 * state keeps a readable ink instead of fading the whole button with opacity.
+	 */
+	function applyBarSendTheme() {
+		if (!parts || !parts.barSend) return
+		var palette = overlayPalette(),
+			disabled = annotations.length === 0
+		try {
+			;(parts.barSend.style.setProperty('background', disabled ? palette.accentDisabled : palette.accent),
+				parts.barSend.style.setProperty('color', disabled ? palette.onAccentDisabled : palette.onAccent),
+				typeof parts.barSend.style.removeProperty == 'function' && parts.barSend.style.removeProperty('opacity'),
+				parts.barSend.setAttribute('aria-disabled', disabled ? 'true' : 'false'),
+				parts.barSend.style.setProperty('cursor', disabled ? 'default' : 'pointer'))
+		} catch {}
+	}
+	/**
+	 * Idempotent restyle of the bottom annotate bar (built once in createOverlay,
 	 * so it needs an explicit repaint when the host theme flips). Safe when the bar
 	 * has not been built yet, and preserves the armed-discard danger colour.
 	 */
@@ -200,7 +221,7 @@
 				parts.bar.style.setProperty('box-shadow', palette.barShadow),
 				parts.barGrip && parts.barGrip.style.setProperty('color', palette.muted),
 				parts.barCount && parts.barCount.style.setProperty('color', palette.text),
-				parts.barSend && (parts.barSend.style.setProperty('background', palette.accent), parts.barSend.style.setProperty('color', palette.onAccent)),
+				parts.barSend && applyBarSendTheme(),
 				parts.barExit && parts.barExit.style.setProperty('color', palette.muted),
 				parts.barLocate && parts.barLocate.style.setProperty('color', palette.muted),
 				parts.barMarkers && parts.barMarkers.style.setProperty('color', palette.muted),

@@ -246,8 +246,40 @@ export function textNodeRanges(container, tags, skips) {
 }
 
 /**
+ * Ordered element tree for one tokenized document. Element children are
+ * collected per opening-tag index; the root bucket (-1) holds the top-level
+ * elements. Void and self-closing tags are element children but never parents,
+ * which is exactly how the runtime's childNodes walk sees them.
+ */
+export function buildElementIndex(tags) {
+  const parents = new Array(tags.length).fill(-1)
+  const childrenOf = new Map()
+  childrenOf.set(-1, [])
+  const stack = []
+  for (let index = 0; index < tags.length; index += 1) {
+    const tag = tags[index]
+    if (tag.closing) {
+      for (let cursor = stack.length - 1; cursor >= 0; cursor -= 1) {
+        if (tags[stack[cursor]].name === tag.name) {
+          stack.length = cursor
+          break
+        }
+      }
+      continue
+    }
+    const parent = stack.length > 0 ? stack[stack.length - 1] : -1
+    parents[index] = parent
+    const bucket = childrenOf.get(parent)
+    if (bucket) bucket.push(index)
+    else childrenOf.set(parent, [index])
+    if (!tag.selfClosing && !VOID_ELEMENTS.has(tag.name)) stack.push(index)
+  }
+  return { parents, childrenOf }
+}
+
+/**
  * Locate the edited element using, in order: id anchor, a unique normalized
- * occurrence of `outerHTML`, then the exact `textBefore` inside a tag whose
+ * occurrence of outerHTML, then the exact textBefore inside a tag whose
  * class/id tokens match the selector.
  */
 export function collectTagIndexes(tags, name) {

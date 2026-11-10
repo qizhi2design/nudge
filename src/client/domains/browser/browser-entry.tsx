@@ -106,26 +106,6 @@ function BrowserGuideCard(props) {
     openNudge(props.ctx, guideTab && guideTab.sessionId ? guideTab.sessionId : props.sessionId, null);
   }
 
-  var rowStyle = function (danger) {
-    return {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 9,
-      width: '100%',
-      height: 34,
-      boxSizing: 'border-box',
-      padding: '0 10px',
-      border: 'none',
-      borderRadius: 'var(--dsw-radius-sm, 6px)',
-      background: 'transparent',
-      color: danger ? theme.danger : theme.text,
-      font: 'var(--dsw-font-xxs-12, 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
-      textAlign: 'left',
-      cursor: 'pointer',
-      whiteSpace: 'nowrap',
-    };
-  };
-
   function MenuRow(props2) {
     var [rowHover, setRowHover] = React.useState(false);
     return React.createElement(
@@ -136,14 +116,65 @@ function BrowserGuideCard(props) {
         onClick: props2.onPick,
         onMouseEnter: function () { setRowHover(true); },
         onMouseLeave: function () { setRowHover(false); },
-        style: Object.assign(rowStyle(), { background: rowHover ? 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')' : 'transparent' }),
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          minHeight: 40,
+          boxSizing: 'border-box',
+          padding: '6px 8px',
+          border: 'none',
+          borderRadius: 'var(--dsw-radius-md, 12px)',
+          background: rowHover
+            ? 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')'
+            : 'transparent',
+          color: 'var(--dsw-alias-label-primary, ' + theme.text + ')',
+          font: 'var(--dsw-font-xxs-12, 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+          textAlign: 'left',
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        },
       },
-      React.createElement('span', { style: { color: theme.muted, display: 'inline-flex', flex: 'none' } }, props2.icon),
       React.createElement(
         'span',
-        { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
-        React.createElement('span', null, props2.label),
-        props2.hint ? React.createElement('span', { style: { color: theme.muted, fontSize: 10.5, lineHeight: 1.3 } }, props2.hint) : null,
+        {
+          'aria-hidden': 'true',
+          style: {
+            width: 20,
+            height: 20,
+            flex: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--dsw-alias-label-secondary, ' + theme.muted + ')',
+          },
+        },
+        props2.icon,
+      ),
+      React.createElement(
+        'span',
+        { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
+        React.createElement(
+          'span',
+          { style: { fontSize: 13, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis' } },
+          props2.label,
+        ),
+        props2.hint
+          ? React.createElement(
+              'span',
+              {
+                style: {
+                  color: 'var(--dsw-alias-label-tertiary, ' + (theme.faint || theme.muted) + ')',
+                  fontSize: 11,
+                  lineHeight: 1.4,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                },
+              },
+              props2.hint,
+            )
+          : null,
       ),
     );
   }
@@ -159,14 +190,17 @@ function BrowserGuideCard(props) {
         style: {
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 14,
           width: '100%',
           minHeight: 56,
           boxSizing: 'border-box',
-          padding: '10px 12px 10px 20px',
-          background: hover || menuOpen ? 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')' : theme.layer1,
-          border: '0.5px solid ' + (menuOpen ? theme.brand : 'var(--dsw-alias-border-l3, ' + (theme.borderStrong || theme.border) + ')'),
-          borderRadius: 'var(--dsw-radius-xl, 12px)',
+          padding: '14px 20px',
+          background:
+            hover || menuOpen
+              ? 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')'
+              : 'var(--dsw-alias-bg-layer-1, ' + theme.layer1 + ')',
+          border: '.5px solid var(--dsw-alias-border-l3, ' + (theme.borderStrong || theme.border) + ')',
+          borderRadius: 'var(--dsw-radius-xl, 20px)',
           color: theme.text,
         },
       },
@@ -195,7 +229,10 @@ function BrowserGuideCard(props) {
         },
         React.createElement(
           'span',
-          { style: { width: 26, height: 26, color: theme.muted, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' } },
+          {
+            'aria-hidden': 'true',
+            style: { width: 26, height: 26, color: 'var(--dsw-alias-label-secondary, ' + theme.muted + ')', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
+          },
           React.createElement(Icon.globe, { size: 24 }),
         ),
         React.createElement(
@@ -217,7 +254,16 @@ function BrowserGuideCard(props) {
       ),
       React.createElement(
         'span',
-        { style: { color: theme.muted, display: 'inline-flex', flex: 'none', transform: menuOpen ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 120ms ease' } },
+        {
+          'aria-hidden': 'true',
+          style: {
+            color: 'var(--dsw-alias-label-tertiary, ' + (theme.faint || theme.muted) + ')',
+            display: 'inline-flex',
+            flex: 'none',
+            transform: menuOpen ? 'rotate(-90deg)' : 'rotate(90deg)',
+            transition: 'transform 120ms ease',
+          },
+        },
         React.createElement(Icon.chevron, { size: 13 }),
       ),
     ),
@@ -226,33 +272,67 @@ function BrowserGuideCard(props) {
           'div',
           {
             role: 'menu',
+            'aria-label': t('browser.chooseAction'),
             style: {
               position: 'absolute',
               top: 'calc(100% + 6px)',
               left: 0,
               right: 0,
-              zIndex: 30,
+              zIndex: 70,
               padding: 4,
-              background: 'var(--dsw-alias-bg-overlay, ' + theme.overlay + ')',
-              border: '1px solid var(--dsw-alias-border-l2, ' + (theme.borderStrong || theme.border) + ')',
-              borderRadius: 'var(--dsw-radius-md, 8px)',
+              background: 'var(--dsw-specific-menu, ' + (theme.layer2 || theme.layer1) + ')',
+              backdropFilter: 'var(--dsw-menu-backdrop-filter, none)',
+              WebkitBackdropFilter: 'var(--dsw-menu-backdrop-filter, none)',
+              border: '.5px solid var(--dsw-alias-border-l2, ' + (theme.borderStrong || theme.border) + ')',
+              borderRadius: 'var(--dsw-radius-lg, 16px)',
               boxShadow: 'var(--dsw-elevation-prominent, 0 8px 24px rgba(0, 0, 0, 0.35))',
+              overflow: 'hidden',
             },
           },
           React.createElement(MenuRow, {
             label: t('browser.openBrowser'),
             hint: t('browser.openBrowserHint'),
-            icon: React.createElement(Icon.globe, { size: 14 }),
+            icon: React.createElement(Icon.globe, { size: 16 }),
             onPick: openBrowser,
           }),
           React.createElement(MenuRow, {
             label: t('browser.activateInspector'),
             hint: t('browser.activateInspectorHint'),
-            icon: React.createElement(Icon.cursor, { size: 14 }),
+            icon: React.createElement(Icon.nudge, { size: 16 }),
             onPick: openInspector,
           }),
         )
       : null,
+  );
+}
+
+/**
+ * Tab-strip title: the product mark plus the localized product name. The title
+ * lives in its own slot so the tab chip looks like the shipped Browser chip
+ * (glyph + label) instead of a bare word.
+ */
+function NudgeTabTitle(props) {
+  var theme = useDshTheme(props.ctx);
+  usePluginConfig();
+  var t = typeof props.t === 'function' ? props.t : function (key) { return key; };
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      'span',
+      {
+        'aria-hidden': 'true',
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: 'none',
+          color: 'var(--dsw-alias-label-tertiary, ' + (theme.faint || theme.muted) + ')',
+        },
+      },
+      React.createElement(Icon.nudge, { size: 15 }),
+    ),
+    t('tab.title'),
   );
 }
 

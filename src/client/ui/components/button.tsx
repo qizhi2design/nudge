@@ -27,13 +27,20 @@ export interface ButtonProps
     VariantProps<typeof buttonVariants> {}
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, variant, size = 'icon', type = 'button', style, ...props },
+  { className, variant, size = 'icon', type = 'button', style, onMouseDown, ...props },
   ref,
 ) {
   return (
     <button
       ref={ref}
       type={type}
+      // Pointer clicks must not take keyboard focus from the embedded page:
+      // otherwise the next Space (the "hold to use the page" gesture) would
+      // activate this toolbar button instead of reaching the page runtime.
+      onMouseDown={(event) => {
+        if (event.button === 0 && event.defaultPrevented === false) event.preventDefault()
+        if (typeof onMouseDown === 'function') onMouseDown(event)
+      }}
       className={cn(buttonVariants({ variant, size }), className)}
       style={{
         display: 'inline-flex',
@@ -53,7 +60,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'transparent',
-        borderRadius: 6,
+        borderRadius: 'var(--dsw-radius-sm, 8px)',
         background: 'transparent',
         cursor: props.disabled ? 'default' : 'pointer',
         opacity: props.disabled ? 0.45 : 1,

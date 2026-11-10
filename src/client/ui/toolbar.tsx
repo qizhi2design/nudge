@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   GitBranch,
   Globe2,
+  Keyboard,
   ListTree,
   MessageSquarePlus,
   Redo2,
@@ -15,6 +16,8 @@ import {
 } from 'lucide-react'
 import { Button } from './components/button'
 import { Tooltip, TooltipProvider } from './components/tooltip'
+import { type ShortcutBinding, type ShortcutPlatform } from './components/kbd'
+import { ModeHintContent, ShortcutSheet, type ShortcutSheetRow } from './components/shortcut-sheet'
 import { toolbarLayout, type ToolbarLayout } from './layout'
 
 export type InspectorMode = 'browse' | 'annotate' | 'edit'
@@ -69,6 +72,15 @@ export interface InspectorToolbarProps {
   hotReload?: boolean
   reloadPending?: boolean
   onToggleHotReload?: () => void
+  /**
+   * Effective shortcut bindings (from the DSH shortcut catalog) so tooltips,
+   * the shortcut sheet and the mode hint show what the system will dispatch.
+   */
+  shortcuts?: {
+    platform: ShortcutPlatform
+    bindings: Record<string, ShortcutBinding | null>
+    rows: ShortcutSheetRow[]
+  }
   features?: {
     annotate?: boolean
     edit?: boolean
@@ -78,15 +90,38 @@ export interface InspectorToolbarProps {
   }
 }
 
-const WIDE_LAYOUT: ToolbarLayout = { compact: false, narrow: false, tiny: false }
+const INITIAL_LAYOUT: ToolbarLayout = { compact: false, tiny: false }
+
+function hoverBackground(theme: InspectorTheme) {
+  return 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')'
+}
+
+function toolBorder(theme: InspectorTheme) {
+  return 'var(--dsw-alias-border-l2, ' + (theme.borderStrong || theme.border) + ')'
+}
+
+function hairlineBorder(theme: InspectorTheme) {
+  return '.5px solid ' + toolBorder(theme)
+}
 
 function Divider({ theme }: { theme: InspectorTheme }) {
   return (
     <span
-      className="dshnudge-h-[18px] dshnudge-w-px dshnudge-flex-none"
-      style={{ background: theme.borderStrong || theme.border, margin: '0 2px' }}
+      className="dshnudge-h-[16px] dshnudge-w-px dshnudge-flex-none"
+      style={{ background: toolBorder(theme), margin: '0 4px' }}
     />
   )
+}
+
+function useHover() {
+  const [hover, setHover] = React.useState(false)
+  return {
+    hover,
+    bind: {
+      onMouseEnter: () => setHover(true),
+      onMouseLeave: () => setHover(false),
+    },
+  }
 }
 
 function IconAction({
@@ -94,6 +129,9 @@ function IconAction({
   disabled,
   active,
   theme,
+  shortcut,
+  shortcutPlatform,
+  ariaExpanded,
   onClick,
   children,
 }: {
@@ -101,20 +139,26 @@ function IconAction({
   disabled?: boolean
   active?: boolean
   theme: InspectorTheme
+  shortcut?: ShortcutBinding | null
+  shortcutPlatform?: ShortcutPlatform
+  ariaExpanded?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
+  const state = useHover()
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} shortcut={shortcut} platform={shortcutPlatform}>
       <Button
         aria-label={label}
+        aria-expanded={ariaExpanded}
         disabled={disabled}
         onClick={onClick}
         variant={active ? 'active' : 'ghost'}
+        {...state.bind}
         style={{
           color: disabled ? theme.muted : active ? theme.text : theme.muted,
-          background: active ? (theme.hover || theme.layer2) : 'transparent',
-          borderColor: active ? (theme.borderStrong || theme.border) : 'transparent',
+          background: active ? (theme.hover || theme.layer2) : state.hover && !disabled ? hoverBackground(theme) : 'transparent',
+          borderColor: active ? toolBorder(theme) : 'transparent',
         }}
       >
         {children}
@@ -129,26 +173,37 @@ function ReloadAction({
   label,
   disabled,
   pending,
+  shortcut,
+  shortcutPlatform,
   onClick,
 }: {
   theme: InspectorTheme
   label: string
   disabled?: boolean
   pending?: boolean
+  shortcut?: ShortcutBinding | null
+  shortcutPlatform?: ShortcutPlatform
   onClick: () => void
 }) {
   const accent = theme.warn || theme.brand
+  const state = useHover()
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} shortcut={shortcut} platform={shortcutPlatform}>
       <Button
         aria-label={label}
         disabled={disabled}
         onClick={onClick}
         variant="ghost"
         data-hot-reload-pending={pending === true ? 'true' : undefined}
+        {...state.bind}
         style={{
           color: pending === true ? accent : theme.muted,
-          background: pending === true ? `color-mix(in srgb, ${accent} 14%, transparent)` : 'transparent',
+          background:
+            pending === true
+              ? `color-mix(in srgb, ${accent} 14%, transparent)`
+              : state.hover && !disabled
+                ? hoverBackground(theme)
+                : 'transparent',
           borderColor: 'transparent',
         }}
       >
@@ -175,32 +230,42 @@ function ReloadAction({
   )
 }
 
-/** Auto-reload toggle with the same pending affordance in both toolbar tiers. */
+/** Auto-reload toggle with the same pending affordance in the action row. */
 function HotReloadAction({
   theme,
   title,
   active,
   pending,
+  shortcut,
+  shortcutPlatform,
   onClick,
 }: {
   theme: InspectorTheme
   title: string
   active: boolean
   pending: boolean
+  shortcut?: ShortcutBinding | null
+  shortcutPlatform?: ShortcutPlatform
   onClick: () => void
 }) {
   const accent = pending ? (theme.warn || theme.brand) : theme.brand
+  const state = useHover()
   return (
-    <Tooltip label={title}>
+    <Tooltip label={title} shortcut={shortcut} platform={shortcutPlatform}>
       <Button
         aria-label={title}
         aria-pressed={active}
         data-hot-reload-pending={pending ? 'true' : undefined}
         onClick={onClick}
         variant="ghost"
+        {...state.bind}
         style={{
           color: pending ? (theme.warn || theme.brand) : active ? theme.text : theme.muted,
-          background: pending ? `color-mix(in srgb, ${accent} 16%, transparent)` : 'transparent',
+          background: pending
+            ? `color-mix(in srgb, ${accent} 16%, transparent)`
+            : state.hover
+              ? hoverBackground(theme)
+              : 'transparent',
           borderColor: pending ? `color-mix(in srgb, ${accent} 34%, transparent)` : 'transparent',
         }}
       >
@@ -217,6 +282,7 @@ function ModeToggle({
   theme,
   icon,
   compact,
+  content,
   onClick,
 }: {
   active: boolean
@@ -225,23 +291,29 @@ function ModeToggle({
   theme: InspectorTheme
   icon: React.ReactNode
   compact: boolean
+  content?: React.ReactNode
   onClick: () => void
 }) {
+  const state = useHover()
   return (
-    <Tooltip label={title}>
+    <Tooltip label={title} content={content}>
       <Button
         aria-pressed={active}
+        aria-label={label}
         title={title}
         size="sm"
         onClick={onClick}
+        {...state.bind}
         style={{
           color: active ? theme.brand : theme.muted,
           borderColor: active
             ? `color-mix(in srgb, ${theme.brand} 34%, transparent)`
-            : (theme.borderStrong || theme.border),
+            : toolBorder(theme),
           background: active
             ? `color-mix(in srgb, ${theme.brand} 13%, transparent)`
-            : 'transparent',
+            : state.hover
+              ? hoverBackground(theme)
+              : 'transparent',
         }}
       >
         {icon}
@@ -273,11 +345,19 @@ export function InspectorToolbar({
   hotReload,
   reloadPending,
   onToggleHotReload,
+  shortcuts,
   features,
 }: InspectorToolbarProps) {
   const enabled = features || {}
   const [draft, setDraft] = React.useState<string | null>(null)
-  const [layout, setLayout] = React.useState<ToolbarLayout>(WIDE_LAYOUT)
+  const [layout, setLayout] = React.useState<ToolbarLayout>(INITIAL_LAYOUT)
+  const [addressFocused, setAddressFocused] = React.useState(false)
+  const [sheetOpen, setSheetOpen] = React.useState(false)
+  const shortcutPlatform: ShortcutPlatform = shortcuts ? shortcuts.platform : 'linux'
+  const shortcutFor = React.useCallback(
+    (id: string): ShortcutBinding | null => (shortcuts && shortcuts.bindings ? shortcuts.bindings[id] ?? null : null),
+    [shortcuts],
+  )
   const rootRef = React.useRef<HTMLDivElement>(null)
   const addressRef = React.useRef<HTMLInputElement>(null)
   const shownUrl = draft !== null ? draft : tab.url || ''
@@ -294,16 +374,24 @@ export function InspectorToolbar({
   const panelsEnabled = domEnabled || workspaceEnabled || hotReloadEnabled
 
   React.useEffect(() => {
+    if (!sheetOpen) return undefined
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setSheetOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [sheetOpen])
+
+  React.useEffect(() => {
     const node = rootRef.current
     if (!node || typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? node.clientWidth
       const next = toolbarLayout(width)
-      setLayout((previous) =>
-        previous.compact === next.compact && previous.narrow === next.narrow && previous.tiny === next.tiny
-          ? previous
-          : next,
-      )
+      setLayout((previous) => (previous.compact === next.compact && previous.tiny === next.tiny ? previous : next))
     })
     observer.observe(node)
     return () => observer.disconnect()
@@ -321,8 +409,8 @@ export function InspectorToolbar({
   const gap = layout.compact ? 4 : 6
   const padding = layout.compact ? '0 6px' : '0 8px'
 
-  /** Row 2 of the narrow tier: modes + panels/hot-reload + history + external. */
-  const toolRow = (
+  /** Row 2, always visible: the Nudge action bar under the native-browser row. */
+  const actionRow = (
     <div
       data-toolbar-secondary=""
       style={{
@@ -331,11 +419,12 @@ export function InspectorToolbar({
         flex: 'none',
         alignItems: 'center',
         gap: 2,
-        padding: '0 8px',
+        padding: '0 6px',
         boxSizing: 'border-box',
-        borderTop: `1px solid ${theme.borderStrong || theme.border}`,
-        background: theme.layer1,
+        borderTop: hairlineBorder(theme),
+        background: theme.base,
         minWidth: 0,
+        overflowX: 'auto',
       }}
     >
       {annotateEnabled ? (
@@ -345,7 +434,8 @@ export function InspectorToolbar({
           title={t('mode.annotateHint')}
           theme={theme}
           icon={<MessageSquarePlus size={13} />}
-          compact
+          compact={layout.compact}
+          content={<ModeHintContent t={t} mode="annotate" platform={shortcutPlatform} />}
           onClick={() => toggleMode('annotate')}
         />
       ) : null}
@@ -356,7 +446,8 @@ export function InspectorToolbar({
           title={t('mode.editHint')}
           theme={theme}
           icon={<SlidersHorizontal size={13} />}
-          compact
+          compact={layout.compact}
+          content={<ModeHintContent t={t} mode="edit" platform={shortcutPlatform} />}
           onClick={() => toggleMode('edit')}
         />
       ) : null}
@@ -366,6 +457,8 @@ export function InspectorToolbar({
           theme={theme}
           label={t('toolbar.dom')}
           active={domOpen === true}
+          shortcut={shortcutFor('nudge.dom.toggle')}
+          shortcutPlatform={shortcutPlatform}
           onClick={() => onToggleDom && onToggleDom()}
         >
           <ListTree size={14} />
@@ -376,6 +469,8 @@ export function InspectorToolbar({
           theme={theme}
           label={t('workspace.open')}
           active={workspaceOpen === true}
+          shortcut={shortcutFor('nudge.workspace.toggle')}
+          shortcutPlatform={shortcutPlatform}
           onClick={() => onToggleWorkspace && onToggleWorkspace()}
         >
           <GitBranch size={14} />
@@ -390,6 +485,10 @@ export function InspectorToolbar({
           onClick={() => onToggleHotReload && onToggleHotReload()}
         />
       ) : null}
+      {/* Wide panes balance the row: view/panel switches stay on the left,
+          history + external + shortcut help anchor the right edge. Narrow
+          panes keep every control visible (the row scrolls horizontally). */}
+      <span style={{ flex: '1 1 auto', minWidth: 4 }} />
       <Divider theme={theme} />
       <IconAction theme={theme} label={t('toolbar.undo')} disabled={!canUndo} onClick={onUndo}>
         <Undo2 size={14} />
@@ -405,11 +504,29 @@ export function InspectorToolbar({
           </IconAction>
         </>
       ) : null}
+      <IconAction
+        theme={theme}
+        label={t('shortcut.help')}
+        active={sheetOpen}
+        ariaExpanded={sheetOpen}
+        onClick={() => setSheetOpen(!sheetOpen)}
+      >
+        <Keyboard size={14} />
+      </IconAction>
     </div>
   )
 
+  const shortcutSheet = sheetOpen && shortcuts ? (
+    <ShortcutSheet
+      t={t}
+      theme={theme}
+      platform={shortcuts.platform}
+      rows={shortcuts.rows}
+    />
+  ) : null
+
   return (
-    <TooltipProvider>
+    <TooltipProvider theme={theme}>
       <div
         ref={rootRef}
         className="dshnudge-flex dshnudge-flex-none dshnudge-flex-col"
@@ -419,7 +536,7 @@ export function InspectorToolbar({
           flex: 'none',
           boxSizing: 'border-box',
           background: theme.base,
-          borderBottom: `1px solid ${theme.borderStrong || theme.border}`,
+          borderBottom: hairlineBorder(theme),
           minWidth: 0,
         }}
       >
@@ -427,7 +544,7 @@ export function InspectorToolbar({
           data-toolbar-primary=""
           style={{
             display: 'flex',
-            height: 40,
+            height: 38,
             flex: 'none',
             alignItems: 'center',
             gap,
@@ -444,7 +561,15 @@ export function InspectorToolbar({
               <ArrowRight size={14} />
             </IconAction>
           )}
-          <ReloadAction theme={theme} label={t('toolbar.reload')} disabled={!tab.url} pending={pending} onClick={onReload} />
+          <ReloadAction
+            theme={theme}
+            label={t('toolbar.reload')}
+            disabled={!tab.url}
+            pending={pending}
+            shortcut={shortcutFor('page.refresh')}
+            shortcutPlatform={shortcutPlatform}
+            onClick={onReload}
+          />
           <form
             onSubmit={submit}
             className="dshnudge-flex dshnudge-flex-1 dshnudge-items-center dshnudge-gap-1"
@@ -481,7 +606,11 @@ export function InspectorToolbar({
                 aria-label={t('toolbar.addressPlaceholder')}
                 placeholder={t('toolbar.addressPlaceholder')}
                 onChange={(event) => setDraft(event.currentTarget.value)}
-                onFocus={(event) => event.currentTarget.select()}
+                onFocus={(event) => {
+                  setAddressFocused(true)
+                  event.currentTarget.select()
+                }}
+                onBlur={() => setAddressFocused(false)}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     setDraft(null)
@@ -495,16 +624,19 @@ export function InspectorToolbar({
                   boxSizing: 'border-box',
                   paddingLeft: 28,
                   paddingRight: 8,
-                  borderRadius: 6,
-                  borderWidth: 1,
+                  borderRadius: 'var(--dsw-radius-sm, 8px)',
+                  borderWidth: '.5px',
                   borderStyle: 'solid',
-                  borderColor: theme.borderStrong || theme.border,
+                  borderColor: toolBorder(theme),
                   color: theme.text,
                   background: theme.layer1,
                   fontFamily: 'inherit',
                   fontSize: 12,
                   lineHeight: '26px',
-                  outline: 'none',
+                  outline: addressFocused
+                    ? '1px solid var(--dsw-alias-state-business-primary, ' + (theme.accent || theme.brand) + ')'
+                    : 'none',
+                  outlineOffset: '-1px',
                 }}
               />
             </div>
@@ -514,79 +646,9 @@ export function InspectorToolbar({
               </IconAction>
             )}
           </form>
-          {layout.narrow ? null : (
-            <>
-              {modesEnabled ? (
-                <div className="dshnudge-flex dshnudge-items-center dshnudge-gap-1" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  {annotateEnabled ? (
-                    <ModeToggle
-                      active={tab.mode === 'annotate'}
-                      label={t('toolbar.annotate')}
-                      title={t('mode.annotateHint')}
-                      theme={theme}
-                      icon={<MessageSquarePlus size={13} />}
-                      compact={layout.compact}
-                      onClick={() => toggleMode('annotate')}
-                    />
-                  ) : null}
-                  {editEnabled ? (
-                    <ModeToggle
-                      active={tab.mode === 'edit'}
-                      label={t('toolbar.edit')}
-                      title={t('mode.editHint')}
-                      theme={theme}
-                      icon={<SlidersHorizontal size={13} />}
-                      compact={layout.compact}
-                      onClick={() => toggleMode('edit')}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-              {domEnabled ? (
-                <IconAction
-                  theme={theme}
-                  label={t('toolbar.dom')}
-                  active={domOpen === true}
-                  onClick={() => onToggleDom && onToggleDom()}
-                >
-                  <ListTree size={14} />
-                </IconAction>
-              ) : null}
-              {workspaceEnabled ? (
-                <IconAction
-                  theme={theme}
-                  label={t('workspace.open')}
-                  active={workspaceOpen === true}
-                  onClick={() => onToggleWorkspace && onToggleWorkspace()}
-                >
-                  <GitBranch size={14} />
-                </IconAction>
-              ) : null}
-              {hotReloadEnabled ? (
-                <HotReloadAction
-                  theme={theme}
-                  title={hotReloadTitle}
-                  active={hotReloadOn}
-                  pending={pending}
-                  onClick={() => onToggleHotReload && onToggleHotReload()}
-                />
-              ) : null}
-              <Divider theme={theme} />
-              <IconAction theme={theme} label={t('toolbar.undo')} disabled={!canUndo} onClick={onUndo}>
-                <Undo2 size={14} />
-              </IconAction>
-              <IconAction theme={theme} label={t('toolbar.redo')} disabled={!canRedo} onClick={onRedo}>
-                <Redo2 size={14} />
-              </IconAction>
-              {carrierKind === 'webview' ? (
-                <IconAction theme={theme} label={t('toolbar.external')} disabled={!tab.url} onClick={onExternal}>
-                  <ArrowUpRight size={14} />
-                </IconAction>
-              ) : null}
-            </>
-          )}
         </div>
-        {layout.narrow ? toolRow : null}
+        {actionRow}
+        {shortcutSheet}
       </div>
     </TooltipProvider>
   )

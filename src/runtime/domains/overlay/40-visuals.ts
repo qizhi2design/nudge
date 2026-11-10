@@ -140,13 +140,55 @@
 	}
 	function updateMarquee() {
 		if (parts) {
-			if (!drag || !drag.active) {
+			if (!drag || !drag.active || drag.structure) {
 				hidePart(parts.marquee)
 				return
 			}
 			var box = { left: Math.min(drag.startX, drag.x), top: Math.min(drag.startY, drag.y), width: Math.abs(drag.x - drag.startX), height: Math.abs(drag.y - drag.startY) }
 			positionPart(parts.marquee, box, annotationAccentColor(), 2)
 		}
+	}
+	/** Drop indicator for the edit-mode structure drag: a line or a container outline. */
+	function updateDropIndicator() {
+		if (!parts || !parts.drop) return
+		var drop = drag && drag.active && drag.structure ? drag.drop : null
+		if (!drop) {
+			hidePart(parts.drop)
+			return
+		}
+		if (drop.mode === 'inside' && drop.box) {
+			setStyleMap(parts.drop, {
+				display: 'block',
+				left: drop.box.left + 'px',
+				top: drop.box.top + 'px',
+				width: Math.max(0, drop.box.width) + 'px',
+				height: Math.max(0, drop.box.height) + 'px',
+				borderStyle: 'dashed',
+				borderWidth: '2px',
+				borderColor: annotationAccentColor(),
+				borderRadius: '4px',
+				background: alphaColor(annotationAccentColor(), 0.08),
+				boxShadow: 'none'
+			})
+			return
+		}
+		var line = drop.line || null
+		if (!line) {
+			hidePart(parts.drop)
+			return
+		}
+		setStyleMap(parts.drop, {
+			display: 'block',
+			left: line.left + 'px',
+			top: Math.max(0, line.top - 1) + 'px',
+			width: Math.max(2, line.width) + 'px',
+			height: '2px',
+			borderStyle: 'none',
+			borderWidth: '0px',
+			borderRadius: '1px',
+			background: annotationAccentColor(),
+			boxShadow: '0 0 0 1px rgba(255,255,255,0.65)'
+		})
 	}
 	function updateMeta() {
 		if (!parts || !parts.meta) return
@@ -224,7 +266,8 @@
 		if (minX > maxX) (minX = 0), (maxX = 0)
 		barOffsetX = Math.max(minX, Math.min(maxX, barOffsetX))
 		var maxBottom = Math.max(8, vh - height - 8),
-			bottom = Math.max(8, Math.min(maxBottom, 14 + barOffsetY))
+			minBottom = Math.min(maxBottom, safeBottom + 8),
+			bottom = Math.max(minBottom, Math.min(maxBottom, 14 + barOffsetY))
 		barOffsetY = bottom - 14
 		try {
 			;(parts.bar.style.setProperty('left', 'calc(50% + ' + Math.round(barOffsetX) + 'px)'), parts.bar.style.setProperty('bottom', Math.round(bottom) + 'px'))
@@ -249,7 +292,7 @@
 	}
 	function updateBar() {
 		if (!parts || !parts.bar) return
-		var visible = mode === 'annotate' && !passthrough
+		var visible = mode === 'annotate' && !passthrough && !barHosted
 		if (!visible) {
 			hidePart(parts.bar)
 			return
@@ -259,10 +302,7 @@
 			wasVisible = parts.bar.style.getPropertyValue('display') === 'flex'
 		} catch {}
 		;(parts.bar.style.setProperty('display', 'flex'), (parts.barCount.textContent = locale.statusAnnotating + (annotations.length > 0 ? ' \xB7 ' + annotations.length : '')), parts.barSend.textContent = locale.statusSend)
-		var disabled = annotations.length === 0
-		try {
-			;(parts.barSend.setAttribute('aria-disabled', disabled ? 'true' : 'false'), parts.barSend.style.setProperty('opacity', disabled ? '0.45' : '1'), parts.barSend.style.setProperty('cursor', disabled ? 'default' : 'pointer'))
-		} catch {}
+		applyBarSendTheme()
 		var nextIconState = (markersHidden ? 'm' : '') + (discardArmed ? 'd' : '')
 		if (nextIconState !== barIconState) {
 			barIconState = nextIconState
@@ -286,6 +326,7 @@
 			} else hidePart(parts.hover)
 			;(flashTarget && isConnected(flashTarget) ? positionPart(parts.flash, rectOf(flashTarget), annotationAccentColor(), 2) : flashTarget && ((flashTarget = null), hidePart(parts.flash)),
 				updateMarquee(),
+				updateDropIndicator(),
 				updateBadges(),
 				updateBar(),
 				updateTextLayer(),

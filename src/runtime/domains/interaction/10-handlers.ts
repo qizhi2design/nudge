@@ -1,4 +1,29 @@
 // @ts-nocheck
+	/**
+	 * Resolve the structural drop for a pointer position: the middle band of a
+	 * container means "nest inside"; the top/bottom band of an element means
+	 * "reorder next to it" inside that element's parent.
+	 */
+	function structureDropAt(source, x, y) {
+		for (var node = elementAtPoint(x, y), guard = 0; node && node.nodeType === 1 && node !== doc.documentElement && guard < 60; guard += 1) {
+			if (isOwnNode(node)) return null
+			if (node === source || (source.contains && source.contains(node))) return null
+			var tag = tagLower(node)
+			if (tag === 'html' || tag === 'head') return null
+			var box = rectOf(node),
+				children = elementChildrenOf(node),
+				vertical = box.height > 0 ? (y - box.top) / box.height : 0.5
+			if (!STRUCTURE_NO_CHILDREN[tag] && (children.length > 0 || (box.width >= 80 && box.height >= 40)) && vertical > 0.32 && vertical < 0.68) return { parent: node, before: null, mode: 'inside', box: box }
+			var parent = node.parentElement
+			if (!parent || parent.nodeType !== 1 || parent === doc.documentElement || isOwnNode(parent)) return null
+			if (parent === source || (source.contains && source.contains(parent))) return null
+			var before = vertical < 0.5 ? node : structureNextSiblingOf(node)
+			if (before === source) return null
+			if (!before) return { parent: parent, before: null, mode: 'append', line: { left: box.left, top: box.bottom, width: box.width } }
+			return { parent: parent, before: before, mode: 'before', line: { left: box.left, top: vertical < 0.5 ? box.top : box.bottom, width: box.width } }
+		}
+		return null
+	}
 	function onDocumentClick(event) {
 		if (!(destroyed || !event) && !isOverlayEvent(event)) {
 			if (passthrough) return
@@ -72,6 +97,7 @@
 					try {
 						event.preventDefault()
 					} catch {}
+					if (drag.structure) drag.drop = structureDropAt(drag.target, drag.x, drag.y)
 					;(updateVisuals(), scheduleFrame())
 				}
 				return
@@ -84,22 +110,45 @@
 	}
 	function onDocumentMouseDown(event) {
 		if (destroyed || passthrough || !event) return
-		if (!(destroyed || mode !== 'annotate' || !event) && !isOverlayEvent(event) && !(typeof event.button == 'number' && event.button !== 0)) {
-			var target = composedTarget(event)
-			target && ((drag = { startX: Number(event.clientX) || 0, startY: Number(event.clientY) || 0, x: Number(event.clientX) || 0, y: Number(event.clientY) || 0, active: !1, target, textStart: !!caretAtPoint(Number(event.clientX) || 0, Number(event.clientY) || 0) }))
+		if (isOverlayEvent(event) || (typeof event.button == 'number' && event.button !== 0)) return
+		var target = composedTarget(event)
+		if (!target) return
+		var x = Number(event.clientX) || 0,
+			y = Number(event.clientY) || 0
+		if (mode === 'annotate') {
+			drag = { startX: x, startY: y, x: x, y: y, active: !1, target: target, textStart: !!caretAtPoint(x, y) }
+			return
 		}
+		// Edit mode: a press-and-drag over the page reorders / re-parents the
+		// pressed element; a plain click keeps its existing "open the card" path.
+		if (mode === 'edit' && !isEditableTarget(target)) drag = { startX: x, startY: y, x: x, y: y, active: !1, target: target, textStart: !1, structure: !0, drop: null }
 	}
 	function onDocumentMouseUp(event) {
 		if (destroyed || !event) return
 		if (passthrough) {
 			drag = null
 			parts && parts.marquee && hidePart(parts.marquee)
+			parts && parts.drop && hidePart(parts.drop)
 			scheduleFrame()
 			return
 		}
 		if (!(destroyed || !drag)) {
 			var current = drag
-			;((drag = null), parts && hidePart(parts.marquee))
+			;((drag = null), parts && parts.marquee && hidePart(parts.marquee), parts && parts.drop && hidePart(parts.drop))
+			if (current.structure) {
+				if (!current.active) {
+					scheduleFrame()
+					return
+				}
+				try {
+					event && (event.preventDefault(), event.stopPropagation())
+				} catch {}
+				suppressClickUntil = Date.now() + 450
+				if (current.drop) structureMove(current.target, current.drop.parent, current.drop.before || null)
+				updateVisuals()
+				scheduleFrame()
+				return
+			}
 			if (current.textStart) {
 				var selected = textSelectionOf()
 				if (selected) {
@@ -143,14 +192,22 @@
 		if (destroyed || !event || event.relatedTarget) return
 		hoverEl = null
 		pointerSeen = !1
+		// Leaving the window mid-drag would otherwise leave the press state (and
+		// its drop indicator) alive without a mouseup to finish it.
+		if (drag) {
+			drag = null
+			parts && parts.marquee && hidePart(parts.marquee)
+			parts && parts.drop && hidePart(parts.drop)
+		}
 		syncPointerCursor()
 		root && updateVisuals()
+		scheduleFrame()
 	}
 	function onKeyDown(event) {
 		if (destroyed || !event) return
 		var key = event.key || '',
 			code = event.code || ''
-		if ((key === ' ' || code === 'Space') && !popover && !isEditableEvent(event)) {
+		if ((key === ' ' || code === 'Space') && !popover && !designCard && !isOverlayEvent(event) && !isEditableEvent(event)) {
 			if (event.repeat || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
 			if (mode !== 'browse') {
 				try {
@@ -182,7 +239,35 @@
 				closePopover()
 				return
 			}
-			drag && ((drag = null), parts && hidePart(parts.marquee), scheduleFrame())
+			if (drag) {
+				;((drag = null), parts && parts.marquee && hidePart(parts.marquee), parts && parts.drop && hidePart(parts.drop), scheduleFrame())
+				return
+			}
+			// Nothing left to close: leave annotate/edit for the browse surface. The
+			// host follows through the mode-change event api.setMode queues.
+			if (mode !== 'browse') {
+				try {
+					;(event.preventDefault(), event.stopPropagation())
+				} catch {}
+				api.setMode('browse')
+			}
+			return
+		}
+		if ((key === 'Delete' || key === 'Backspace') && mode === 'edit' && selectionEl && !popover && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
+			try {
+				;(event.preventDefault(), event.stopPropagation())
+			} catch {}
+			structureRemove(selectionEl)
+			return
+		}
+		// Shift+Tab toggles annotate <-> edit; from browse it enters annotate so the
+		// key never lands on an ambiguous "last used" mode after a reload.
+		if ((key === 'Tab' || code === 'Tab') && event.shiftKey && !passthrough && !popover && !designCard && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
+			try {
+				;(event.preventDefault(), event.stopPropagation())
+			} catch {}
+			api.setMode(mode === 'edit' ? 'annotate' : mode === 'annotate' ? 'edit' : 'annotate')
+			return
 		}
 	}
 	function onKeyUp(event) {
@@ -199,6 +284,9 @@
 		passthrough = !1
 		pointerSeen = !1
 		hoverEl = null
+		drag = null
+		parts && parts.marquee && hidePart(parts.marquee)
+		parts && parts.drop && hidePart(parts.drop)
 		removeCursorStyle()
 		syncPointerCursor()
 		root && updateVisuals()
