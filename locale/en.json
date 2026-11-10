@@ -43,7 +43,6 @@
     "locate": "Locate",
     "copySelector": "Copy element path",
     "copied": "Copied",
-    "noPage": "Enter an address to open a page",
     "width": "Width",
     "height": "Height",
     "display": "Display",
@@ -406,5 +405,26 @@
     "collapse": "Collapse messages",
     "shrink": "Shrink to a floating button",
     "expand": "Open chat"
+  },
+  "surface": {
+    "emptyTitle": "Open a page and start tuning it",
+    "emptyBody": "Once a page is open, click an element to leave a note, adjust styles live, then hand the result to the AI.",
+    "openWorkspace": "Pick from workspace",
+    "enterUrl": "Enter a web address",
+    "errorTitle": "This page could not load",
+    "errorBody": "The address may be wrong, or the local preview server is not running. Retry, or pick another HTML page from the workspace.",
+    "retry": "Retry",
+    "errorDetail": "Error",
+    "brandName": "Nudge",
+    "featureAnnotateTitle": "Annotate elements",
+    "featureAnnotateBody": "Click anything and describe what the AI should change",
+    "featureEditTitle": "Tune styles live",
+    "featureEditBody": "Text, color, spacing — see it while you adjust it",
+    "featureAiTitle": "Hand it to the AI",
+    "featureAiBody": "Notes and edits go to the AI together",
+    "workspaceTitle": "Pages in the workspace",
+    "workspaceLoading": "Reading the workspace…",
+    "workspaceHint": "No HTML pages yet: enter an address above, or put a page in the workspace.",
+    "workspaceMore": "See all files"
   }
 }

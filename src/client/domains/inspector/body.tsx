@@ -16,6 +16,32 @@ function initialInspectorMode(record) {
   return 'browse';
 }
 
+/**
+ * Which surface the page area should show:
+ *  - 'empty': no page is open yet (first-run onboarding);
+ *  - 'error': the carrier landed on Chrome's error page or reported a load
+ *    failure — showing the raw white error page is useless to the user;
+ *  - 'page': a page is loaded (or loading).
+ *
+ * `runtime-missing` is handled separately: the page itself is visible, only the
+ * overlay runtime failed, so the banner explains that instead of replacing it.
+ */
+function isBlankPageUrl(url) {
+  var text = typeof url === 'string' ? url.trim() : '';
+  // Electron's initial guest document is `about:blank#<uuid>` (a unique hash),
+  // not the bare `about:blank`; both mean "no page is open".
+  return text === '' || /^about:(?:blank|srcdoc)(?:[#?].*)?$/i.test(text);
+}
+
+function inspectorSurfaceState(url, error) {
+  var text = typeof url === 'string' ? url.trim() : '';
+  if (isBlankPageUrl(text)) return 'empty';
+  if (/^chrome-error:\/\//i.test(text)) return 'error';
+  var reason = typeof error === 'string' ? error : '';
+  if (reason !== '' && reason !== 'runtime-missing') return 'error';
+  return 'page';
+}
+
 /** ` · detail` suffix for the source-sync notice; empty when there is no detail. */
 function syncNoticeSuffix(detail) {
   var text = detail === null || detail === undefined ? '' : String(detail).trim();
@@ -516,6 +542,12 @@ function NudgeBody(props) {
   // The workspace panel owns its refresh action; the dock header borrows it.
   var workspaceRefreshRef = React.useRef(null);
   var [notice, setNotice] = React.useState(null);
+  // Incremented when the onboarding card asks the toolbar to focus the address
+  // bar; the toolbar owns the input and selects it on each new request.
+  var [addressFocusRequest, setAddressFocusRequest] = React.useState(0);
+  // HTML pages listed on the welcome surface (null while reading, [] when the
+  // workspace has none / the feature is off).
+  var [welcomeFiles, setWelcomeFiles] = React.useState(null);
   // Host annotate bar mirror: the floating dock covers the in-page bar, so the
   // dock renders its own bar and needs the marker-toggle state.
   var markersHiddenState = React.useState(false);
@@ -652,11 +684,12 @@ function NudgeBody(props) {
           patchTab(tabId, {
             canGoBack: payload.canGoBack,
             canGoForward: payload.canGoForward,
-            url: payload.url || tabRef.current.url,
+            url: isBlankPageUrl(payload.url) ? '' : payload.url || tabRef.current.url,
           });
         },
         navigated: function (payload) {
-          if (payload.url) patchTab(tabId, { url: payload.url });
+          if (isBlankPageUrl(payload.url)) patchTab(tabId, { url: '' });
+          else if (payload.url) patchTab(tabId, { url: payload.url });
         },
         title: function (payload) {
           if (payload.title) patchTab(tabId, { title: payload.title });
@@ -932,6 +965,31 @@ function NudgeBody(props) {
     };
   }, []);
   var dockOverlay = dockHostWidth > 0 && dockHostWidth < NUDGE_DOCK_NARROW;
+
+  // ------------------------------------------------------ welcome pages
+  // Read the workspace HTML list once the empty surface is shown so the user
+  // can start from a real page instead of typing an address first.
+  React.useEffect(function () {
+    if (inspectorSurfaceState(tab.url, tab.error) !== 'empty') return undefined;
+    if (sessionId === '' || features.enableWorkspaceVersions === false) {
+      setWelcomeFiles([]);
+      return undefined;
+    }
+    var cancelled = false;
+    setWelcomeFiles(null);
+    createRemote(props.ctx)('workspace', workspaceArgs(sessionId)).then(
+      function (snapshot) {
+        if (!cancelled) setWelcomeFiles(workspaceFiles(snapshot).slice(0, 6));
+      },
+      function () {
+        if (!cancelled) setWelcomeFiles([]);
+      },
+    );
+    return function () {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab.url, tab.error, sessionId, features.enableWorkspaceVersions]);
 
   // ----------------------------------------------------------- hot reload
   // Poll the Host watcher (~900ms). The first response only records the
@@ -1410,6 +1468,318 @@ function NudgeBody(props) {
   });
   shortcutBindings['page.refresh'] = nudgeShortcutBinding('page.refresh');
 
+  // ------------------------------------------------------ welcome / error
+
+  /** Open one workspace page from the welcome list in this tab. */
+  function openWelcomeFile(file) {
+    if (!file || sessionId === '') return;
+    createRemote(props.ctx)('previewOpen', previewOpenArgs(sessionId, file.path)).then(
+      function (result) {
+        if (result && result.url) navigate(result.url);
+      },
+      function (failure) {
+        setNotice({ tone: 'error', text: t('workspace.openFailed', { message: workspaceErrorMessage(failure) }) });
+      },
+    );
+  }
+
+  /**
+   * The page area's own first-run page and load-failure page. These render in
+   * the host panel (the embedded page is left empty / on Chrome's error page),
+   * so the user always sees a designed surface with a clear next step instead
+   * of a blank white area.
+   */
+  function renderSurfaceCard() {
+    var state = inspectorSurfaceState(tab.url, tab.error);
+    if (state === 'page') return null;
+    var empty = state === 'empty';
+    var canWorkspace = features.enableWorkspaceVersions !== false;
+    var surface = {
+      position: 'absolute',
+      inset: 0,
+      zIndex: 4,
+      overflow: 'auto',
+      boxSizing: 'border-box',
+      display: 'flex',
+      alignItems: empty ? 'flex-start' : 'center',
+      justifyContent: 'center',
+      padding: empty ? '30px 20px 26px' : '18px',
+      background:
+        'radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, ' +
+        (empty ? theme.brand : theme.danger) +
+        ' 9%, transparent), transparent 62%), ' +
+        theme.base,
+      color: theme.text,
+      pointerEvents: 'auto',
+    };
+    var inner = {
+      width: '100%',
+      maxWidth: 560,
+      margin: empty ? '0 auto' : 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: empty ? 16 : 10,
+      textAlign: 'center',
+    };
+    var primaryStyle = {
+      height: 32,
+      padding: '0 16px',
+      border: 'none',
+      borderRadius: 8,
+      background: theme.brand,
+      color: theme.onBrand || theme.base,
+      font: 'inherit',
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap',
+    };
+    var secondaryStyle = {
+      height: 32,
+      padding: '0 14px',
+      border: '.5px solid ' + (theme.borderStrong || theme.border),
+      borderRadius: 8,
+      background: 'transparent',
+      color: theme.text,
+      font: 'inherit',
+      fontSize: 12,
+      fontWeight: 500,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap',
+    };
+    function requestAddress() {
+      setAddressFocusRequest(function (value) { return value + 1; });
+    }
+    var actions = React.createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 6 } },
+      empty
+        ? React.createElement(
+            'button',
+            { type: 'button', 'data-dsh-nudge-surface-action': 'primary', onClick: canWorkspace && welcomeFiles !== null && welcomeFiles.length === 0 ? requestAddress : canWorkspace ? function () { toggleDock('workspace'); } : requestAddress, style: primaryStyle },
+            canWorkspace ? t('surface.openWorkspace') : t('surface.enterUrl'),
+          )
+        : React.createElement(
+            'button',
+            { type: 'button', 'data-dsh-nudge-surface-action': 'primary', onClick: function () { reload(); }, style: primaryStyle },
+            t('surface.retry'),
+          ),
+      React.createElement(
+        'button',
+        { type: 'button', 'data-dsh-nudge-surface-action': 'secondary', onClick: empty ? requestAddress : canWorkspace ? function () { toggleDock('workspace'); } : requestAddress, style: secondaryStyle },
+        empty ? t('surface.enterUrl') : canWorkspace ? t('surface.openWorkspace') : t('surface.enterUrl'),
+      ),
+    );
+
+    if (!empty) {
+      var errorText = tab.error && tab.error !== 'runtime-missing' ? String(tab.error) : '';
+      var detailText = errorText !== '' ? errorText : t('surface.errorDetail');
+      return React.createElement(
+        'div',
+        { 'data-dsh-nudge-surface': 'error', style: surface },
+        React.createElement(
+          'div',
+          { role: 'alert', 'data-dsh-nudge-surface-card': 'error', style: inner },
+          React.createElement(
+            'div',
+            {
+              style: {
+                width: 46,
+                height: 46,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 13,
+                color: theme.danger,
+                background: 'color-mix(in srgb, ' + theme.danger + ' 12%, transparent)',
+                border: '.5px solid color-mix(in srgb, ' + theme.danger + ' 32%, transparent)',
+              },
+            },
+            React.createElement(Icon.globe, { size: 24 }),
+          ),
+          React.createElement('div', { style: { fontSize: 15, fontWeight: 600, lineHeight: '22px', marginTop: 2 } }, t('surface.errorTitle')),
+          React.createElement('div', { style: { color: theme.muted, fontSize: 12, lineHeight: '19px', maxWidth: 420 } }, t('surface.errorBody')),
+          React.createElement(
+            'div',
+            {
+              style: {
+                width: '100%',
+                maxWidth: 440,
+                minWidth: 0,
+                maxHeight: 54,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                marginTop: 4,
+                padding: '6px 9px',
+                borderRadius: 7,
+                background: theme.layer2 || theme.hover || 'transparent',
+                color: theme.muted,
+                font: '10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                wordBreak: 'break-all',
+                textAlign: 'left',
+              },
+            },
+            detailText,
+            tab.url ? ' · ' + String(tab.url) : '',
+          ),
+          actions,
+        ),
+      );
+    }
+
+    var featureCards = [
+      { icon: Icon.annotate, title: t('surface.featureAnnotateTitle'), body: t('surface.featureAnnotateBody') },
+      { icon: Icon.edit, title: t('surface.featureEditTitle'), body: t('surface.featureEditBody') },
+      { icon: Icon.spark, title: t('surface.featureAiTitle'), body: t('surface.featureAiBody') },
+    ].map(function (feature, index) {
+      return React.createElement(
+        'div',
+        {
+          key: 'feature:' + index,
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            minWidth: 0,
+            padding: '11px 12px',
+            borderRadius: 10,
+            border: '.5px solid ' + (theme.borderStrong || theme.border),
+            background: theme.layer1,
+            textAlign: 'left',
+          },
+        },
+        React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 6, color: theme.brand } }, React.createElement(feature.icon, { size: 14 }), React.createElement('span', { style: { fontSize: 12, fontWeight: 600, color: theme.text } }, feature.title)),
+        React.createElement('span', { style: { color: theme.muted, fontSize: 10.5, lineHeight: '16px' } }, feature.body),
+      );
+    });
+
+    var workspaceSection = null;
+    if (canWorkspace) {
+      var list = null;
+      if (welcomeFiles === null) {
+        list = React.createElement('div', { style: { color: theme.muted, fontSize: 11, padding: '10px 12px' } }, t('surface.workspaceLoading'));
+      } else if (welcomeFiles.length === 0) {
+        list = React.createElement('div', { style: { color: theme.muted, fontSize: 11, lineHeight: '17px', padding: '10px 12px' } }, t('surface.workspaceHint'));
+      } else {
+        list = welcomeFiles.map(function (file) {
+          var path = String(file.path || '');
+          var name = file.name ? String(file.name) : workspacePathName(path);
+          var dir = file.dir !== undefined ? String(file.dir) : workspacePathDir(path);
+          return React.createElement(
+            'button',
+            {
+              key: 'welcome:' + path,
+              type: 'button',
+              'data-dsh-nudge-welcome-file': path,
+              title: path,
+              onClick: function () { openWelcomeFile(file); },
+              onMouseEnter: function (event) {
+                event.currentTarget.style.background = theme.hover || theme.layer2;
+              },
+              onMouseLeave: function (event) {
+                event.currentTarget.style.background = 'transparent';
+              },
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                width: '100%',
+                height: 30,
+                padding: '0 10px',
+                border: 'none',
+                borderTop: '.5px solid ' + (theme.borderStrong || theme.border),
+                background: 'transparent',
+                color: theme.text,
+                font: 'inherit',
+                fontSize: 11.5,
+                textAlign: 'left',
+                cursor: 'pointer',
+              },
+            },
+            React.createElement(Icon.file, { size: 12 }),
+            React.createElement('span', { style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, name),
+            dir !== ''
+              ? React.createElement('span', { style: { flex: 'none', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: theme.faint || theme.muted, fontSize: 10.5 } }, dir)
+              : null,
+          );
+        });
+      }
+      workspaceSection = React.createElement(
+        'div',
+        { style: { width: '100%', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2, textAlign: 'left' } },
+        React.createElement(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 2px' } },
+          React.createElement('span', { style: { color: theme.muted, fontSize: 11, fontWeight: 600 } }, t('surface.workspaceTitle')),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: function () { toggleDock('workspace'); },
+              style: { border: 'none', background: 'transparent', color: theme.brand, font: 'inherit', fontSize: 10.5, cursor: 'pointer', padding: 0 },
+            },
+            t('surface.workspaceMore'),
+          ),
+        ),
+        React.createElement(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              borderRadius: 10,
+              border: '.5px solid ' + (theme.borderStrong || theme.border),
+              background: theme.layer1,
+              overflow: 'hidden',
+            },
+          },
+          list,
+        ),
+      );
+    }
+
+    return React.createElement(
+      'div',
+      { 'data-dsh-nudge-surface': 'empty', style: surface },
+      React.createElement(
+        'div',
+        { role: 'region', 'data-dsh-nudge-surface-card': 'empty', style: inner },
+        React.createElement(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          React.createElement(
+            'span',
+            {
+              style: {
+                width: 34,
+                height: 34,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 10,
+                color: theme.brand,
+                background: 'color-mix(in srgb, ' + theme.brand + ' 12%, transparent)',
+                border: '.5px solid color-mix(in srgb, ' + theme.brand + ' 30%, transparent)',
+              },
+            },
+            React.createElement(Icon.nudge, { size: 20 }),
+          ),
+          React.createElement('span', { style: { fontSize: 12, fontWeight: 600, color: theme.muted, letterSpacing: '.02em' } }, t('surface.brandName')),
+        ),
+        React.createElement('div', { style: { fontSize: 20, fontWeight: 700, lineHeight: '28px', maxWidth: 460 } }, t('surface.emptyTitle')),
+        React.createElement('div', { style: { color: theme.muted, fontSize: 12, lineHeight: '19px', maxWidth: 440 } }, t('surface.emptyBody')),
+        React.createElement(
+          'div',
+          { style: { width: '100%', maxWidth: 480, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8, marginTop: 4 } },
+          featureCards,
+        ),
+        actions,
+        workspaceSection,
+      ),
+    );
+  }
+
   // ----------------------------------------------------------- render
 
   return React.createElement(
@@ -1457,6 +1827,7 @@ function NudgeBody(props) {
         bindings: shortcutBindings,
       },
       hotkeys: hotkeys,
+      focusAddressRequest: addressFocusRequest,
       features: {
         annotate: features.enableAnnotate !== false,
         edit: features.enableEdit !== false,
@@ -1535,27 +1906,7 @@ function NudgeBody(props) {
           'data-dsh-nudge-webview': '',
           style: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' },
         }),
-      !tab.url
-        ? React.createElement(
-            'div',
-            {
-              style: {
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 10,
-                color: theme.muted,
-                background: theme.base,
-                pointerEvents: 'none',
-              },
-            },
-            React.createElement(Icon.globe, { size: 26 }),
-            React.createElement('div', { style: { font: 'var(--dsw-font-xs-13, 13px/1.4 sans-serif)' } }, t('dock.noPage')),
-          )
-        : null,
+      renderSurfaceCard(),
       tab.loading
         ? React.createElement(
             'div',

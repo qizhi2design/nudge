@@ -56,6 +56,8 @@ export interface InspectorToolbarProps {
   carrierKind?: string
   /** Page-local single-key hotkeys (physical codes) from plugin settings. */
   hotkeys: ModeHotkeyMap
+  /** Increment to focus + select the address bar (onboarding / error surface). */
+  focusAddressRequest?: number
   canUndo: boolean
   canRedo: boolean
   onBack: () => void
@@ -487,6 +489,7 @@ export function InspectorToolbar({
   tab,
   carrierKind,
   hotkeys,
+  focusAddressRequest,
   canUndo,
   canRedo,
   onBack,
@@ -518,6 +521,13 @@ export function InspectorToolbar({
   )
   const rootRef = React.useRef<HTMLDivElement>(null)
   const addressRef = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    if (!focusAddressRequest) return
+    const node = addressRef.current
+    if (node === null) return
+    node.focus()
+    node.select()
+  }, [focusAddressRequest])
   const shownUrl = draft !== null ? draft : tab.url || ''
   const hotReloadOn = hotReload !== false
   const pending = reloadPending === true && hotReloadOn

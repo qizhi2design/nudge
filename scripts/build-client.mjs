@@ -184,6 +184,7 @@ ${pieces.join('\n\n')}
       runNudgeTabAction: runNudgeTabAction,
       nudgeTabCommandEntry: nudgeTabCommandEntry,
       initialInspectorMode: initialInspectorMode,
+      inspectorSurfaceState: inspectorSurfaceState,
       floatingComposerEligible: floatingComposerEligible,
       locateFloatingChat: locateFloatingChat,
       installFloatingComposer: installFloatingComposer,

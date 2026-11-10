@@ -10,7 +10,7 @@
 | 测试 | 结果 |
 | --- | --- |
 | `node test/runtime-smoke.mjs` | 462 checks / 0 failures（新增 structure payload / elementKey / applyInsert / applyMoveElement；新增单键 A / E 激活、可配置页面热键、↑ / ↓ 批注切换与 Esc 分层退出） |
-| `node test/client-smoke.mjs` | 190 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化 / 3 条应用级命令、2 条 fixed 行、HTML 链接识别与聊天徽标文案） |
+| `node test/client-smoke.mjs` | 200 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化 / 3 条应用级命令、2 条 fixed 行、HTML 链接识别与聊天徽标文案） |
 | `node test/brand-icon.test.mjs` | 26 checks / 0 failures（`icon.svg` 元信息 / 与 `NudgeMark` 逐形状几何一致 / Tab、选择菜单、标签菜单、右键菜单、设置导航五个身份位统一） |
 | `node test/toolbar-hot-reload.test.mjs` | 39 checks / 0 failures（自动刷新选中/取消/待刷新与面板文案宽度） |
 | `node test/dock-panel.test.mjs` | 37 checks / 0 failures（单 Dock 状态、宽度 clamp/键盘/双击、浮层 Esc、嵌入面板） |
@@ -93,6 +93,14 @@
 - 标注 composer 打开时 Space 始终作为输入字符（沿用 `!popover` 守卫）。
 - 页面 passthrough 只在焦点位于被检查页面、且无浮层输入目标时生效；`Esc` 仍可退出接管。
 - 回归用例：`runtime-smoke` 新增“样式卡打开时 Space 不 passthrough / 样式卡输入内 Space 不 passthrough”两项；真实 DSH Web Client 里点击编辑后按 Space，模式保持不变（此前会被 `编辑` 按钮的点击重新触发并退出编辑）。
+
+## 2.4 首次打开 / 页面打不开的引导
+
+- **空状态**：没有页面（无 URL、`about:blank` 或 Electron 初始 guest 文档 `about:blank#<uuid>`）时，页面区显示完整的欢迎页（`data-dsh-nudge-surface="empty"`）而不是空白或 about:blank：产品标记 + 标题/说明 + 三张能力卡（标注元素 / 实时改样式 / 交给 AI）+ 主次按钮（从工作区选择 / 输入网址）+ 「工作区里的页面」列表（通过 Host `workspace` 读取前 6 个 HTML，点行直接在当前标签打开；读取中/无页面各有提示，并可「查看全部文件」进工作区面板）。「输入网址」聚焦并选中地址栏，由工具栏 `focusAddressRequest` 驱动。
+- **加载失败**：carrier 上报非 `runtime-missing` 的加载错误、或地址变成 `chrome-error://chromewebdata/` 时，显示错误卡（`data-dsh-nudge-surface="error"`），盖住 Chrome 原生错误页；卡片提供「重试」、工作区入口 / 输入网址，并以小字展示错误码与 URL。
+- **`runtime-missing` 例外**：页面本身能打开、只是注入运行时失败（如 PDF / 非网页内容）时保留页面，只显示顶部错误条，避免把可读内容盖住。
+- **状态判定**：纯函数 `inspectorSurfaceState(url, error)`（`client-smoke` 覆盖空 / `about:blank` / `about:blank#<uuid>` / `about:srcdoc` / chrome-error / carrier 失败 / runtime-missing / 正常页面八种）；导航回调把空白 guest URL 归一为空串，地址栏不会显示 `about:blank#uuid`；导航成功后 `navigate()` 会清空 error，卡片自动消失。
+- **层级**：卡片用 `position:absolute; inset:0; z-index:4` 盖在 `<webview>` / iframe 之上，`pointer-events:auto`，不会拦截工具栏与 Dock。
 
 ## 2.5 聊天 HTML 链接与工作区入口
 

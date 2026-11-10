@@ -267,6 +267,19 @@ assert(
   'settings hotkey section localized in both dictionaries',
 )
 assert(
+  zhDict['surface.emptyTitle'] === '打开一个网页，开始标注和改样式' &&
+    typeof zhDict['surface.emptyBody'] === 'string' &&
+    zhDict['surface.openWorkspace'] === '从工作区选择' &&
+    zhDict['surface.featureAnnotateTitle'] === '标注元素' &&
+    zhDict['surface.workspaceTitle'] === '工作区里的页面' &&
+    zhDict['surface.retry'] === '重试' &&
+    enDict['surface.emptyTitle'] === 'Open a page and start tuning it' &&
+    typeof enDict['surface.errorBody'] === 'string' &&
+    enDict['surface.openWorkspace'] === 'Pick from workspace' &&
+    enDict['surface.workspaceTitle'] === 'Pages in the workspace',
+  'onboarding and load-error surface copy localized',
+)
+assert(
   zhDict['link.openBadge'] === '轻推' &&
     zhDict['link.openWith'] === '打开方式' &&
     zhDict['link.openInBrowser'] === '在浏览器中打开' &&
@@ -406,6 +419,16 @@ disposeQueued()
 workspaceTestHook.registerNudgeTabCommands('t2', 'session-1', { run: () => {} })()
 assert(workspaceTestHook.initialInspectorMode({ navigation: { params: { mode: 'annotate' } } }) === 'annotate', 'shortcut params open the inspector in annotate')
 assert(workspaceTestHook.initialInspectorMode({ navigation: { params: { mode: 'bogus' } } }) === 'browse', 'unknown shortcut params fall back to browse')
+const surfaceState = workspaceTestHook.inspectorSurfaceState
+assert(typeof surfaceState === 'function', 'page surface state helper is bundled')
+assert(surfaceState('', null) === 'empty', 'no URL shows the onboarding surface')
+assert(surfaceState('about:blank', null) === 'empty', 'about:blank counts as no page')
+assert(surfaceState('about:blank#e76fc0a9-228b-4fb9-bdc1-51e24cf02268', null) === 'empty', 'about:blank with the guest hash counts as no page')
+assert(surfaceState('about:srcdoc', null) === 'empty', 'about:srcdoc counts as no page')
+assert(surfaceState('chrome-error://chromewebdata/', null) === 'error', 'Chrome error pages show the load-error surface')
+assert(surfaceState('http://127.0.0.1:4173/index.html', 'ERR_CONNECTION_REFUSED') === 'error', 'carrier load failures show the load-error surface')
+assert(surfaceState('http://127.0.0.1:4173/index.html', 'runtime-missing') === 'page', 'runtime-missing keeps the page visible')
+assert(surfaceState('http://127.0.0.1:4173/index.html', null) === 'page', 'a loaded page shows the page surface')
 assert(typeof workspaceTestHook.ModeHintContent === 'function', 'mode hint surface is exported from the UI bundle')
 const pluginT = workspaceTestHook.usePluginTranslator
 assert(typeof pluginT === 'function', 'plugin-language translator hook is bundled')

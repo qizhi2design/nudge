@@ -43,7 +43,6 @@
     "locate": "定位",
     "copySelector": "复制元素路径",
     "copied": "已复制",
-    "noPage": "输入网址打开页面",
     "width": "宽度",
     "height": "高度",
     "display": "显示方式",
@@ -406,5 +405,26 @@
     "collapse": "收起消息区",
     "shrink": "收缩成悬浮按钮",
     "expand": "展开对话"
+  },
+  "surface": {
+    "emptyTitle": "打开一个网页，开始标注和改样式",
+    "emptyBody": "在轻推里打开页面后，点元素写批注、实时调样式，改完可以把结果交给 AI。",
+    "openWorkspace": "从工作区选择",
+    "enterUrl": "输入网址",
+    "errorTitle": "这个页面打不开",
+    "errorBody": "地址可能写错了，或本地预览服务没有启动。重试一下，或换一个工作区里的 HTML 页面。",
+    "retry": "重试",
+    "errorDetail": "错误信息",
+    "brandName": "轻推",
+    "featureAnnotateTitle": "标注元素",
+    "featureAnnotateBody": "点一下元素，写下你希望 AI 怎么改",
+    "featureEditTitle": "实时改样式",
+    "featureEditBody": "文字、颜色、间距，边调边看效果",
+    "featureAiTitle": "交给 AI",
+    "featureAiBody": "批注和修改会一起发给 AI 落地",
+    "workspaceTitle": "工作区里的页面",
+    "workspaceLoading": "正在读取工作区…",
+    "workspaceHint": "还没有 HTML 页面：在地址栏输入网址，或把页面放进工作区。",
+    "workspaceMore": "查看全部文件"
   }
 }
