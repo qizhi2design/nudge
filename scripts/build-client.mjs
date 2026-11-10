@@ -121,7 +121,7 @@ const banner = `/**
 `
 
 const output = `${banner}window.__ModuleLoader__.load({
-  id: 'dsh.nudge',
+  id: '@huangqz/dsh.nudge',
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
@@ -149,7 +149,7 @@ ${uiCode}
 
 ${pieces.join('\n\n')}
 
-    exports.name = 'dsh.nudge';
+    exports.name = '@huangqz/dsh.nudge';
     exports.inject = INJECT;
     exports.apply = apply;
     // Read-only engineering seam for test/workspace-panel.test.mjs. DSH itself

@@ -1,6 +1,6 @@
 # 持续集成：每个 PR 和推送到 main 的提交都跑一遍构建 + 测试。
 #
-# 这个仓库的根目录就是 dsh.nudge 插件包本身（package.json 在根上），
+# 这个仓库的根目录就是 @huangqz/dsh.nudge 插件包本身（package.json 在根上），
 # 所以所有命令都直接在仓库根目录执行。
 name: CI
 

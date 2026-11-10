@@ -90,7 +90,9 @@ var NUDGE_SHORTCUT_SPACE = {
 }
 
 /**
- * Read-only page-local rows for the mode keys the injected runtime owns. They
+ * Read-only page-local rows for the mode keys the injected runtime owns: Esc
+ * exits the mode, Shift+Tab switches between annotate and edit, and
+ * ArrowUp / ArrowDown switch annotations while annotate mode is active. They
  * are listed in the shortcut reference (and the in-product sheet) but cannot be
  * rebound here: the page document receives the key first, not the host UI.
  */
@@ -108,6 +110,20 @@ var NUDGE_SHORTCUT_PAGE_KEYS = [
     keys: ['Shift', 'Tab'],
     group: 'application',
     bindings: [{ code: 'Tab', modifiers: ['shift'] }],
+  },
+  {
+    id: 'nudge.fixed.annotationPrev',
+    label: 'shortcut.prevAnnotation',
+    keys: ['↑'],
+    group: 'application',
+    bindings: [{ code: 'ArrowUp', modifiers: [] }],
+  },
+  {
+    id: 'nudge.fixed.annotationNext',
+    label: 'shortcut.nextAnnotation',
+    keys: ['↓'],
+    group: 'application',
+    bindings: [{ code: 'ArrowDown', modifiers: [] }],
   },
 ]
 

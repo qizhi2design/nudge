@@ -7,12 +7,56 @@
 			height = Math.max(0, Number(region.height) || 0)
 		return { x: round2(x), y: round2(y), width: round2(width), height: round2(height) }
 	}
-	function openAnnotationEditor(annotationId) {
+	function openAnnotationEditor(annotationId, options) {
 		if (destroyed) return { ok: !1, reason: 'destroyed' }
 		var annotation = findAnnotation(annotationId)
 		if (!annotation) return { ok: !1, reason: 'not-found' }
 		var element = annotationElement(annotation)
-		return (element && selectElement(element, !1), popover && closePopover(), openPopover({ mode: 'edit', annotationId: annotation.id, note: annotation.note, element: element || null, region: annotation.region || null, textSelection: annotation.textSelection || null }), { ok: !0, annotation: cloneAnnotation(annotation) })
+		return (element && selectElement(element, !1), popover && closePopover(), openPopover({ mode: 'edit', annotationId: annotation.id, note: annotation.note, element: element || null, region: annotation.region || null, textSelection: annotation.textSelection || null, focusTextarea: !(options && options.focusTextarea === !1) }), { ok: !0, annotation: cloneAnnotation(annotation) })
+	}
+	/**
+	 * Cycle annotate-mode focus to the previous (-1) or next (+1) annotation,
+	 * wrapping around. The target is located (scroll + flash + select) and its
+	 * editor reopened without stealing focus, so repeated presses keep cycling.
+	 * Returns false when nothing can be shown so the page key falls through.
+	 */
+	function focusAdjacentAnnotation(direction) {
+		if (destroyed || mode !== 'annotate' || annotations.length === 0) return !1
+		var total = annotations.length,
+			step = direction > 0 ? 1 : -1,
+			current = -1,
+			index = 0
+		if (popover && popover.draft && popover.draft.annotationId)
+			for (index = 0; index < total; index += 1)
+				if (annotations[index].id === popover.draft.annotationId) {
+					current = index
+					break
+				}
+		// No editor open: fall back to the selected element (last match wins for
+		// duplicate annotations on one element), then to the selection selector.
+		if (current < 0 && selectionEl)
+			for (index = total - 1; index >= 0; index -= 1)
+				if (annotationElement(annotations[index]) === selectionEl) {
+					current = index
+					break
+				}
+		if (current < 0 && selectionSelector)
+			for (index = total - 1; index >= 0; index -= 1)
+				if (annotations[index].selector === selectionSelector) {
+					current = index
+					break
+				}
+		var annotation = annotations[current < 0 ? (direction > 0 ? 0 : total - 1) : (current + step + total) % total]
+		if (!annotation) return !1
+		var selector = annotation.selector || (annotation.textSelection && annotation.textSelection.selector),
+			found = selector ? locate(selector) : null
+		if (!found || !found.ok) {
+			var element = annotationElement(annotation)
+			element && locate(cssPath(element))
+		}
+		var editor = openAnnotationEditor(annotation.id, { focusTextarea: !1 })
+		;(updateVisuals(), scheduleFrame())
+		return !!(editor && editor.ok === !0)
 	}
 	function updateAnnotation(annotationId, note) {
 		if (destroyed) return { ok: !1, annotation: null }

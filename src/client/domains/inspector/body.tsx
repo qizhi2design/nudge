@@ -395,6 +395,27 @@ function applyHistoryStep(deps, direction) {
     });
 }
 
+/**
+ * True when a host keydown target owns text input, so the mode Esc shortcut must
+ * not steal the key from an editable field (address bar, dock inputs, settings).
+ * The embedded page lives in its own document; its runtime applies the same
+ * guard on its side.
+ */
+function isEditableShortcutTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  try {
+    if (target.isContentEditable === true) return true;
+    if (typeof target.closest !== 'function') return false;
+    return (
+      target.closest(
+        'input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"]',
+      ) !== null
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
 function NudgeBody(props) {
   var t = props.t;
   var theme = useDshTheme(props.ctx);
@@ -837,6 +858,27 @@ function NudgeBody(props) {
       carrier.clearSelection();
     }
   }, [tab.mode, tab.ready]);
+
+  // Host-level Esc: the page runtime exits annotate/edit from inside the guest
+  // document, but focus can sit on host chrome (toolbar, dock, panel). Mirror
+  // the same exit here so Esc works from anywhere in the panel. Skip events
+  // another surface already handled, text fields, modifier chords, the shortcut
+  // sheet itself (the sheet owns its Esc), and hidden mounted tabs — keepMounted
+  // bodies stay alive, so a background tab must not react to Esc.
+  React.useEffect(function () {
+    if (tab.mode === 'browse' || !floatingVisible) return undefined;
+    function onHostKeyDown(event) {
+      if (event.defaultPrevented || event.isComposing === true) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (document.querySelector('[data-shortcut-sheet]') !== null) return;
+      patchTab(tabId, { mode: 'browse' });
+    }
+    window.addEventListener('keydown', onHostKeyDown);
+    return function () {
+      window.removeEventListener('keydown', onHostKeyDown);
+    };
+  }, [tab.mode, tabId, floatingVisible]);
 
   React.useEffect(function () {
     if (tab.url) {

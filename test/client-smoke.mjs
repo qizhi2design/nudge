@@ -76,7 +76,7 @@ globalThis.__ModuleLoader__ = {
 const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
 runInThisContext(source, { filename: 'lib/client.js' })
 assert(loaded !== null, 'bundle registers a factory')
-assert(loaded.id === 'dsh.nudge', 'factory id equals the package name')
+assert(loaded.id === '@huangqz/dsh.nudge', 'factory id equals the package name')
 const exportsObject = loaded.factory((name) => {
   if (name === 'react') return React
   throw new Error('unexpected require: ' + name)
@@ -234,6 +234,24 @@ assert(
   zhDict['shortcut.exitMode'] === '退出标注 / 编辑模式' && enDict['shortcut.switchMode'] === 'Switch between annotate and edit',
   'mode shortcut hints localized in both dictionaries',
 )
+assert(
+  zhDict['shortcut.annotate'] === '轻推：进入 / 退出标注模式' &&
+    zhDict['shortcut.edit'] === '轻推：进入 / 退出编辑模式' &&
+    enDict['shortcut.annotate'] === 'Nudge: enter / exit annotate mode' &&
+    enDict['shortcut.edit'] === 'Nudge: enter / exit edit mode',
+  'mode commands state both activation and cancellation',
+)
+assert(
+  zhDict['shortcut.hintToggleOff'] === '再按一次退出' &&
+    zhDict['shortcut.hintSwitchAnnotation'] === '切换批注' &&
+    zhDict['shortcut.prevAnnotation'] === '上一个批注' &&
+    zhDict['shortcut.nextAnnotation'] === '下一个批注' &&
+    enDict['shortcut.hintToggleOff'] === 'Press again to exit' &&
+    enDict['shortcut.hintSwitchAnnotation'] === 'Switch annotation' &&
+    enDict['shortcut.prevAnnotation'] === 'Previous annotation' &&
+    enDict['shortcut.nextAnnotation'] === 'Next annotation',
+  'mode tooltip and annotation-navigation hints localized in both dictionaries',
+)
 assert(registrations.tabs.length === 1, 'exactly one tab type registered')
 assert(registrations.tabs[0].id === 'dsh.nudge', 'tab type id matches the plugin id')
 assert(registrations.tabs[0].kind === 'nudge', 'tab type kind registered')
@@ -281,7 +299,7 @@ assert(
   'annotation mode follows the reference Cmd/Ctrl+Shift+. binding',
 )
 assert(
-  registrations.fixedShortcuts.length === 3 &&
+  registrations.fixedShortcuts.length === 5 &&
     registrations.fixedShortcuts[0].id === 'nudge.fixed.space' &&
     registrations.fixedShortcuts[0].bindings[0].code === 'Space',
   'page-local Space interaction registers as a read-only fixed row',
@@ -294,8 +312,13 @@ assert(
   'page-local Esc / Shift+Tab mode keys register as read-only fixed rows',
 )
 assert(
-  Array.isArray(workspaceTestHook.nudgeShortcutPageKeys) && workspaceTestHook.nudgeShortcutPageKeys.length === 2,
-  'the mode page-key rows are exposed to the shortcut sheet',
+  registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.annotationPrev' && fixed.bindings[0].code === 'ArrowUp') &&
+    registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.annotationNext' && fixed.bindings[0].code === 'ArrowDown'),
+  'page-local ↑/↓ annotation navigation registers as read-only fixed rows',
+)
+assert(
+  Array.isArray(workspaceTestHook.nudgeShortcutPageKeys) && workspaceTestHook.nudgeShortcutPageKeys.length === 4,
+  'the mode page-key rows (Esc / Shift+Tab / ↑ / ↓) are exposed to the shortcut sheet',
 )
 const keycapModel = workspaceTestHook.keycapModel
 const macKeys = keycapModel({ code: 'Period', modifiers: ['meta', 'shift'] }, 'macos')

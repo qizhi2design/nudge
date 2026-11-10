@@ -1,6 +1,6 @@
 # 发布：在 GitHub 上发布 Release（或手动触发）后，自动
 #   1. 构建并跑测试；
-#   2. `npm publish` 到 npm（包名 dsh.nudge，public）；
+#   2. `npm publish` 到 npm（包名 @huangqz/dsh.nudge，public）；
 #   3. 重写 market/index.json（把本次版本放进 versions 最前）并提交回 main。
 #
 # 仓库根目录就是插件包根目录，所以命令都在根目录执行。
@@ -105,5 +105,5 @@ jobs:
             exit 0
           fi
           version="$(node -p "require('./package.json').version")"
-          git commit -m "chore(market): record dsh.nudge ${version}"
+          git commit -m "chore(market): record @huangqz/dsh.nudge ${version}"
           git push origin HEAD:main

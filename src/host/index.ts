@@ -32,7 +32,7 @@ import { createWorkspaceDomain } from './workspace.js'
 const execFileAsync = promisify(execFile)
 
 /** Cordis plugin name. */
-export const name = 'dsh.nudge'
+export const name = '@huangqz/dsh.nudge'
 
 /** Hard dependencies; every optional capability is resolved through ctx.get. */
 export const inject = ['fs', 'sessions']
@@ -190,7 +190,7 @@ Config.dict = {
 
 const configStandardSchema = {
   version: 1,
-  vendor: 'dsh.nudge',
+  vendor: '@huangqz/dsh.nudge',
   validate(value) {
     return { value: normalizeConfig(value) }
   },
@@ -994,7 +994,7 @@ export function apply(ctx, rawConfig) {
   })
 
   const REMOTE_CONTRIBUTION = {
-    package: 'dsh.nudge',
+    package: '@huangqz/dsh.nudge',
     face: 'host',
     schemas: [],
     model: { services: [], events: [], objects: [] },

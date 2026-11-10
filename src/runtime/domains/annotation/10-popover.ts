@@ -191,9 +191,13 @@
 				built.textarea.value = draft.note
 			} catch {}
 			positionPopover()
-			try {
-				;(typeof built.textarea.focus == 'function' && built.textarea.focus(), typeof built.textarea.setSelectionRange == 'function' && built.textarea.setSelectionRange(draft.note.length, draft.note.length))
-			} catch {}
+			// Keyboard annotation cycling reopens the editor without taking focus
+			// away from the page, so the following ArrowUp/ArrowDown keeps reaching
+			// the document-level shortcut handler.
+			if (settings.focusTextarea !== !1)
+				try {
+					;(typeof built.textarea.focus == 'function' && built.textarea.focus(), typeof built.textarea.setSelectionRange == 'function' && built.textarea.setSelectionRange(draft.note.length, draft.note.length))
+				} catch {}
 			return (scheduleFrame(), !0)
 		} catch {
 			return ((popover = null), !1)

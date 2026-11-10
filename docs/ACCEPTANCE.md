@@ -9,8 +9,8 @@
 
 | 测试 | 结果 |
 | --- | --- |
-| `node test/runtime-smoke.mjs` | 425 checks / 0 failures（新增 structure payload / elementKey / applyInsert / applyMoveElement） |
-| `node test/client-smoke.mjs` | 152 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化） |
+| `node test/runtime-smoke.mjs` | 445 checks / 0 failures（新增 structure payload / elementKey / applyInsert / applyMoveElement；新增标注模式 ↑ / ↓ 批注切换与 Esc 分层退出） |
+| `node test/client-smoke.mjs` | 172 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化 / 5 条 fixed 行与工具提示文案） |
 | `node test/brand-icon.test.mjs` | 26 checks / 0 failures（`icon.svg` 元信息 / 与 `NudgeMark` 逐形状几何一致 / Tab、选择菜单、标签菜单、右键菜单、设置导航五个身份位统一） |
 | `node test/toolbar-hot-reload.test.mjs` | 39 checks / 0 failures（自动刷新选中/取消/待刷新与面板文案宽度） |
 | `node test/dock-panel.test.mjs` | 37 checks / 0 failures（单 Dock 状态、宽度 clamp/键盘/双击、浮层 Esc、嵌入面板） |
@@ -52,6 +52,8 @@
   - 页面只保留编号 pin / 文字高亮，**不再显示页面左下角浮动评论卡**（编辑 / 删除通过点 pin、再次点击已标注元素，或对话框 clip 卡片完成）；
   - 页面底部出现 Codex 风格「正在批注 · N」浮条：六点拖拽手柄（可拖动、自动夹在视口内）+ 定位最新批注 + 隐藏 / 显示标记 + 丢弃批注（两步确认）+ 蓝色「发送」+「×」退出。
 - 浮条动作验收：隐藏标记后 pin / 区域一起隐藏、浮条保留；再次点击恢复；丢弃批注需要连续两次点击才会清空。
+- 批注切换验收：标注模式下按 `↑` / `↓` 循环切换批注（首尾相接）；当前批注滚动到视口中央并闪一下，同时打开该批注的编辑框且不抢输入焦点，因此可以连续按方向键逐条浏览；焦点在编辑框 textarea 内时方向键仍移动光标，不切换批注；没有批注时方向键交还页面滚动。
+- 模式热键验收：`⌘⇧.` / `⌘⇧E`（Windows / Linux 为 `Ctrl+Shift+…`）分别独立进入 / 退出标注与编辑模式；tooltip 同时展示当前生效键位、「再按一次退出」、`↑` `↓` 切换批注与 `Esc` 退出。
 - 按住 Space 临时交还页面；Esc 退出接管。
 - 标注保存、编辑、删除都走同一套 runtime → Client 事件链路。
 
@@ -142,15 +144,18 @@
 
 ## 6.2 快捷键（系统注册 + lucide 键帽）验收
 
-- **注册**：轻推通过 `ctx.inject(['shortcuts'])` 注册 5 个可编辑命令（`nudge.open` / `nudge.annotate.toggle` / `nudge.edit.toggle` / `nudge.dom.toggle` / `nudge.workspace.toggle`）和 3 个只读 fixed 行（`nudge.fixed.space` / `nudge.fixed.escape` / `nudge.fixed.shiftTab`），命令随后出现在 DSH「设置 → 快捷键」中，可录制 / 改键 / 恢复默认。
+- **注册**：轻推通过 `ctx.inject(['shortcuts'])` 注册 5 个可编辑命令（`nudge.open` / `nudge.annotate.toggle` / `nudge.edit.toggle` / `nudge.dom.toggle` / `nudge.workspace.toggle`）和 5 个只读 fixed 行（`nudge.fixed.space` / `nudge.fixed.escape` / `nudge.fixed.shiftTab` / `nudge.fixed.annotationPrev` / `nudge.fixed.annotationNext`），命令随后出现在 DSH「设置 → 快捷键」中，可录制 / 改键 / 恢复默认；fixed 行只做参考与冲突占位，不拦截页面输入。
 - **默认键位**：标注切换默认 `primary+shift+Period`（即参考实现的 `CmdOrCtrl+Shift+.`）；其余为 `primary+shift` + `I/E/D/G`，覆盖 `desktop:macos/windows/linux` 与 `web:macos/windows`（web:linux 不注册，符合 shortcut 服务的 Web 限制）。
+- **模式热键语义**：标注 / 编辑各自一个独立开关热键——按一次进入，再按一次退出；在另一个模式里按键会直接切到该模式。命令标签明确写成「进入 / 退出标注模式」「进入 / 退出编辑模式」，tooltip 与 DSH 快捷键面板文案一致。
+- **页面内键位**：focus 在注入页面里时，`↑` / `↓` 只在标注模式生效，循环切换已添加的批注（滚动定位 + 高亮 + 打开该批注的编辑框，且不抢焦点，因此可连续按）；没有批注时按键继续交给页面滚动。`Esc` 先关闭样式卡 / 批注编辑框，再退出标注或编辑模式。
+- **宿主内 Esc**：焦点在宿主工具栏 / Dock（而不是页面）时，`Esc` 同样退出标注 / 编辑模式；输入框获得焦点、快捷键表展开、或事件已被其它浮层消费时不抢占。
 - **路由**：命令解析当前聚焦的右侧边栏 target；聚焦的轻推 Tab 有已挂载 body 时直接派发给 tab 命令总线；没有时聚焦同会话已有轻推 Tab，或按目标 pane 打开新 Tab（带 `params.mode` / 浏览器 URL），面板命令在 body 注册后由待处理队列补发；`isTargetCurrent` 会拒绝过期的 target。
 - **可用性**：功能开关关闭时命令返回 blocked（`shortcut.featureOff`）；没有会话 / target 时返回 `shortcut.noSession`；register 单条失败被隔离，不影响其它命令。
 - **键帽**：`keycapModel(binding, platform)` 是纯函数（`client-smoke` 覆盖 macOS `⌘/⇧`、Windows `Ctrl/⇧`、Space 图标与字母/标点映射）；tooltip、快捷键表共用 `ShortcutKeys`。
 - **无覆盖**：快捷键表是工具栏内布局行；交互提示是宿主自绘的 fixed tooltip 卡片（`data-tooltip-card`），优先绘制在 toolbar 上方，不覆盖 `<webview>`。`data-shortcut-sheet` / `data-mode-hint-content` / `data-tooltip-card` 作为 DOM 契约供验收断言。
 - **真实壳验证**：在 DSH Web Client（同一套 shell + 同一 Client bundle）里 hover 标注按钮，`data-tooltip-card` 定位在 toolbar 上方、文案与 Space 键帽完整可见；此前 Radix popper 的方案在该壳里 wrapper 停在 `translate(0,-200%)`（`isPositioned=false`），tooltip 实际渲染到视口外，这是“重启后仍看不到”的根因。
 - **主题适配**：`TooltipProvider` 接收 `InspectorTheme`，Light 主题卡片 `background = #e9ecf2`（`--dsw-alias-bg-overlay`）、文字 `#0f1115`；Dark 主题卡片 `background = #2c2c2e`（`--dsw-alias-tooltip-bg`）、文字浅色；边框 / 阴影 / keycap 同步跟随 DSH token。Light / Dark 截图预览见 `docs/evidence/23` / `24`。
-- **验证**：`node test/client-smoke.mjs` 断言注册 id 顺序、默认键位、fixed 行、三条 resolve 分支（feature gate / no session / live dispatch）、新 Tab 打开与队列补发、键帽模型；`npx tsc --noEmit` 通过。
+- **验证**：`node test/client-smoke.mjs` 断言注册 id 顺序、默认键位、5 条 fixed 行（含 ↑ / ↓）、三条 resolve 分支（feature gate / no session / live dispatch）、新 Tab 打开与队列补发、键帽模型与新增 tooltip / 批注导航文案；`node test/runtime-smoke.mjs` 新增「标注模式 ↑ / ↓ 循环切换（首尾相接、不抢焦点、textarea 内保持光标行为）」「Esc 先关编辑框再退出标注 / 编辑」「无批注时方向键交还滚动」用例；`../validation/runtime-cdp.mjs` 在真实 Chromium 里同样验证方向键切换、`preventDefault`、焦点不被抢、Esc 分层退出（116 checks）；`npx tsc --noEmit` 通过。
 
 ## 6.1 设置页（产品偏好）验收
 

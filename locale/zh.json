@@ -166,8 +166,8 @@
   "shortcut": {
     "open": "打开轻推",
     "noSession": "请先打开一个会话",
-    "annotate": "轻推：切换标注模式",
-    "edit": "轻推：切换编辑模式",
+    "annotate": "轻推：进入 / 退出标注模式",
+    "edit": "轻推：进入 / 退出编辑模式",
     "domTree": "轻推：切换 DOM 树",
     "workspace": "轻推：切换工作区版本",
     "holdSpace": "轻推：按住空格键临时操作网页",
@@ -179,8 +179,12 @@
     "pageLocal": "页面内",
     "hintAnnotate": "点一下添加批注，拖动可框选区域",
     "hintEdit": "点元素调整样式",
+    "hintSwitchAnnotation": "切换批注",
+    "hintToggleOff": "再按一次退出",
     "exitMode": "退出标注 / 编辑模式",
     "switchMode": "切换标注与编辑模式",
+    "prevAnnotation": "上一个批注",
+    "nextAnnotation": "下一个批注",
     "hintSpaceBefore": "按住",
     "hintSpaceAfter": "临时操作网页"
   },

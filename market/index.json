@@ -40,7 +40,7 @@
   },
   "plugins": [
     {
-      "name": "dsh.nudge",
+      "name": "@huangqz/dsh.nudge",
       "title": {
         "en": "Nudge",
         "zh": "轻推"
@@ -72,7 +72,7 @@
       "versions": [
         {
           "version": "1.0.0",
-          "publishTimestamp": 1794316758,
+          "publishTimestamp": 1794317488,
           "source": {
             "type": "npm"
           },

@@ -234,7 +234,7 @@ assert(
 const entry = {
   options: {
     id: 'nudge',
-    name: 'dsh.nudge',
+    name: '@huangqz/dsh.nudge',
     config: { language: 'zh', enableAnnotate: false, urlRoot: 'http://127.0.0.1:4173' },
   },
 }
@@ -293,7 +293,7 @@ assert(defaults.saved === true, 'configUpdate accepts the product defaults patch
 
 // 0b. About & update snapshot: package/build/git facts, honest update check.
 const about = await api.about(false)
-assert(about.name === 'dsh.nudge', 'about reports the package name')
+assert(about.name === '@huangqz/dsh.nudge', 'about reports the package name')
 assert(typeof about.version === 'string' && about.version.length > 0, 'about reports the package version', about.version)
 assert(typeof about.pluginRoot === 'string' && about.pluginRoot.endsWith('plugin'), 'about reports the plugin root', about.pluginRoot)
 assert(Array.isArray(about.builds) && about.builds.some((build) => build.name === 'client.js'), 'about reports the built client artifact')
@@ -325,7 +325,7 @@ state.extra.pluginManager = {
     return { status: 'listed', installed: about.version, registry: 'npm', versions: [{ version: '9.9.9' }], attempts: [] }
   },
   async updateBundle(packageName, version, options) {
-    assert(packageName === 'dsh.nudge', 'updateBundle receives the plugin package name')
+    assert(packageName === '@huangqz/dsh.nudge', 'updateBundle receives the plugin package name')
     assert(typeof options?.requestId === 'string' && options.requestId.length > 0, 'updateBundle receives a request id')
     return {
       from: about.version,
@@ -348,7 +348,7 @@ state.extra.pluginManager.updateBundle = async () => ({
     changed: false,
     application: 'failed',
     stage: 'install',
-    target: 'dsh.nudge',
+    target: '@huangqz/dsh.nudge',
     error: { code: 'invalid-spec', diagnostic: 'dsh.nudge@9.9.10 declares no dsh.bundle' },
   },
 })
@@ -359,7 +359,7 @@ state.extra.pluginManager.updateBundle = async () => ({
   from: '9.9.9',
   to: '9.9.11',
   step: 'install',
-  result: { changed: true, application: 'applied', stage: 'install', target: 'dsh.nudge' },
+  result: { changed: true, application: 'applied', stage: 'install', target: '@huangqz/dsh.nudge' },
 })
 const applied = await api.update('9.9.11')
 assert(applied.status === 'updated', 'an HMR-applied update reports updated')

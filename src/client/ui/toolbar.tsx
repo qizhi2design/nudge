@@ -596,7 +596,14 @@ export function InspectorToolbar({
           theme={theme}
           icon={<MessageSquarePlus size={13} />}
           compact={layout.compact}
-          content={<ModeHintContent t={t} mode="annotate" platform={shortcutPlatform} />}
+          content={
+            <ModeHintContent
+              t={t}
+              mode="annotate"
+              platform={shortcutPlatform}
+              binding={shortcutFor('nudge.annotate.toggle')}
+            />
+          }
           onClick={() => toggleMode('annotate')}
         />
       ) : null}
@@ -608,7 +615,14 @@ export function InspectorToolbar({
           theme={theme}
           icon={<SlidersHorizontal size={13} />}
           compact={layout.compact}
-          content={<ModeHintContent t={t} mode="edit" platform={shortcutPlatform} />}
+          content={
+            <ModeHintContent
+              t={t}
+              mode="edit"
+              platform={shortcutPlatform}
+              binding={shortcutFor('nudge.edit.toggle')}
+            />
+          }
           onClick={() => toggleMode('edit')}
         />
       ) : null}

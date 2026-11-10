@@ -1,10 +1,10 @@
 # 发布指南（RELEASING）
 
-`dsh.nudge` 一次“发布”其实包含三件事，缺一不可：
+`@huangqz/dsh.nudge` 一次“发布”其实包含三件事，缺一不可：
 
 | 东西 | 位置 | 作用 |
 | --- | --- | --- |
-| npm 包 | https://www.npmjs.com/package/dsh.nudge | 用户实际安装的代码 |
+| npm 包 | https://www.npmjs.com/package/@huangqz/dsh.nudge | 用户实际安装的代码 |
 | 市场索引 | 仓库里的 `market/index.json`（发布后可通过 raw URL 访问） | 市场里怎么展示、自动更新去查哪个版本 |
 | GitHub Release | https://github.com/qizhi2design/nudge/releases | 版本说明；也是自动发布流水线的触发器 |
 
@@ -20,11 +20,11 @@ https://raw.githubusercontent.com/qizhi2design/nudge/main/market/index.json
 
 ## 0. 一次性准备
 
-1. **npm 账号**：能发布 `dsh.nudge`（发布前确认 `npm view dsh.nudge version` 返回 404，说明名字没被占）。
+1. **npm 账号**：能发布 `@huangqz/dsh.nudge`（发布前确认 `npm view @huangqz/dsh.nudge version` 返回 404，说明名字没被占）。
 2. **GitHub 仓库**：public 的 `qizhi2design/nudge`。
 3. **NPM_TOKEN（自动发布用）**：
    1. 登录 npmjs.com → 右上头像 → **Access Tokens** → **Generate New Token**；
-   2. 选 **Classic Token** 的 **Automation**（最省事，不受 2FA 交互影响），或 **Granular Token**：Packages and scopes 选 *Read and write*，Packages 选 `dsh.nudge`，并允许 publish；
+   2. 选 **Classic Token** 的 **Automation**（最省事，不受 2FA 交互影响），或 **Granular Token**：Packages and scopes 选 *Read and write*，Packages 选 `@huangqz/dsh.nudge`，并允许 publish；
    3. 复制 token（只显示一次）；
    4. 打开 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**；
    5. Name 填 `NPM_TOKEN`，Secret 粘贴 token，保存。
@@ -69,7 +69,7 @@ gh release create v1.0.1 --title "v1.0.1" --notes "发布说明..."
 校验发布结果：
 
 ```bash
-npm view dsh.nudge version          # 应输出刚发布的版本
+npm view @huangqz/dsh.nudge version          # 应输出刚发布的版本
 curl -s https://raw.githubusercontent.com/qizhi2design/nudge/main/market/index.json | head
 ```
 
@@ -153,9 +153,9 @@ node scripts/market-index.mjs                                   # 用当前时�
 
 ## 6. 常见问题
 
-**npm publish 报 401 / EOTP**：本地 token 或 `NPM_TOKEN` 失效；Automation token 不会触发 OTP，Granular token 需要带 publish 权限并放行 `dsh.nudge`。
+**npm publish 报 401 / EOTP**：本地 token 或 `NPM_TOKEN` 失效；Automation token 不会触发 OTP，Granular token 需要带 publish 权限并放行 `@huangqz/dsh.nudge`。
 
-**npm publish 报 403 / You do not have permission to publish "dsh.nudge"**：包名被占用或 token 权限不足；先用 `npm view dsh.nudge version` 确认。
+**npm publish 报 403 / You do not have permission to publish "@huangqz/dsh.nudge"**：包名被占用或 token 权限不足；先用 `npm view @huangqz/dsh.nudge version` 确认。
 
 **npm ci 报 lock 文件不同步**：`package.json` 依赖改了但没更新 `package-lock.json`；在本地执行 `npm install --package-lock-only` 后提交。
 

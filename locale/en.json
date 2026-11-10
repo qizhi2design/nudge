@@ -166,8 +166,8 @@
   "shortcut": {
     "open": "Open Nudge",
     "noSession": "Open a session first",
-    "annotate": "Nudge: toggle annotation mode",
-    "edit": "Nudge: toggle edit mode",
+    "annotate": "Nudge: enter / exit annotate mode",
+    "edit": "Nudge: enter / exit edit mode",
     "domTree": "Nudge: toggle DOM tree",
     "workspace": "Nudge: toggle workspace versions",
     "holdSpace": "Nudge: hold Space to use the page",
@@ -179,8 +179,12 @@
     "pageLocal": "On the page",
     "hintAnnotate": "Click anywhere to add a note; drag to select a region",
     "hintEdit": "Click an element to adjust its styles",
+    "hintSwitchAnnotation": "Switch annotation",
+    "hintToggleOff": "Press again to exit",
     "exitMode": "Exit annotate / edit mode",
     "switchMode": "Switch between annotate and edit",
+    "prevAnnotation": "Previous annotation",
+    "nextAnnotation": "Next annotation",
     "hintSpaceBefore": "Hold",
     "hintSpaceAfter": "to use the page"
   },

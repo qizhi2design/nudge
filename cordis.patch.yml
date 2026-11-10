@@ -5,4 +5,4 @@
 # registers one right-Sidebar tab type plus its guide entry.
 - insert:
     - id: nudge
-      name: 'dsh.nudge'
+      name: '@huangqz/dsh.nudge'

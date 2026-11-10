@@ -120,13 +120,17 @@ Nudge（中文名「轻推」）是 DSH Desktop 的一个插件。它把网页�
 | 动作 | macOS | Windows / Linux |
 | --- | --- | --- |
 | 打开轻推 | `⌘⇧I` | `Ctrl+Shift+I` |
-| 切换标注模式 | `⌘⇧.` | `Ctrl+Shift+.` |
-| 切换编辑模式 | `⌘⇧E` | `Ctrl+Shift+E` |
+| 进入 / 退出标注模式 | `⌘⇧.` | `Ctrl+Shift+.` |
+| 进入 / 退出编辑模式 | `⌘⇧E` | `Ctrl+Shift+E` |
 | 切换 DOM 树 | `⌘⇧D` | `Ctrl+Shift+D` |
 | 切换工作区版本 | `⌘⇧G` | `Ctrl+Shift+G` |
+| 切换批注（标注模式内） | `↑` / `↓` | `↑` / `↓` |
+| 退出标注 / 编辑模式 | `Esc` | `Esc` |
 | 临时操作网页（按住） | `Space` | `Space` |
 
-页面里还有几个顺手的小操作：`Esc` 退出标注 / 编辑；输入批注时 `Enter` 添加、`Shift+Enter` 换行。
+标注和编辑各自有独立的开关热键：按一次进入，再按一次退出；两个模式之间也可以直接切换。进入标注模式后，`↑` / `↓` 会在已添加的批注之间循环切换（当前批注会自动滚到视口内并打开批注编辑框），`Esc` 先关闭弹层，再退出标注 / 编辑模式。悬停工具栏的「标注 / 编辑」就能看到当前生效的键位和这些操作提示。
+
+页面里还有几个顺手的小操作：输入批注时 `Enter` 添加、`Shift+Enter` 换行；`Shift+Tab` 在标注与编辑之间切换。
 
 ## 常见问题
 
@@ -189,7 +193,7 @@ npm test               # 全部工程测试（不需要 Chrome）
 - [设计系统与组件规范](docs/DESIGN_SYSTEM.md)：颜色 token、组件、图标与交互细节。
 - [验收记录](docs/ACCEPTANCE.md)：逐项功能与截图证据。
 
-**发布**：包名 `dsh.nudge`，插件市场索引地址为
+**发布**：包名 `@huangqz/dsh.nudge`，插件市场索引地址为
 `https://raw.githubusercontent.com/qizhi2design/nudge/main/market/index.json`。
 
 </details>

@@ -300,7 +300,7 @@ const SNAPSHOT = {
   source: 'profile',
 }
 const ABOUT = {
-  name: 'dsh.nudge',
+  name: '@huangqz/dsh.nudge',
   version: '0.2.0',
   pluginRoot: '/Users/example/visual-inspector/plugin',
   builds: [{ name: 'client.js', mtime: 1760000000000, size: 600000 }],

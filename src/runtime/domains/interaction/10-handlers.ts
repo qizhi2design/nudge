@@ -264,6 +264,17 @@
 			structureRemove(selectionEl)
 			return
 		}
+		// Annotate-mode ArrowUp/ArrowDown cycles through existing annotations
+		// (wrap-around), reopening each editor without focus so repeats keep
+		// cycling. Anything outside the exact guard falls through to the page.
+		if ((key === 'ArrowUp' || key === 'ArrowDown' || code === 'ArrowUp' || code === 'ArrowDown') && mode === 'annotate' && !passthrough && !drag && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
+			if (focusAdjacentAnnotation(key === 'ArrowDown' || code === 'ArrowDown' ? 1 : -1)) {
+				try {
+					;(event.preventDefault(), event.stopPropagation())
+				} catch {}
+				return
+			}
+		}
 		// Shift+Tab toggles annotate <-> edit; from browse it enters annotate so the
 		// key never lands on an ambiguous "last used" mode after a reload.
 		if ((key === 'Tab' || code === 'Tab') && event.shiftKey && !passthrough && !popover && !designCard && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
