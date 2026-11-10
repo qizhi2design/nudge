@@ -6,7 +6,7 @@
 # 仓库根目录就是插件包根目录，所以命令都在根目录执行。
 #
 # 需要在仓库 Settings → Secrets and variables → Actions 里配置：
-#   NPM_TOKEN = npm @qizhi2design 账号的 Automation token（或 Granular token，需 publish 权限）
+#   NPM_TOKEN = npm @huangqz 账号的 Automation token（或 Granular token，需 Read and write + bypass 2FA）
 # 详细步骤见 RELEASING.md。
 name: Release
 
