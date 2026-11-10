@@ -20,6 +20,7 @@
 import { VOID_ELEMENTS } from '../constants.js'
 import { canonicalSelector, lastCompound, compoundTokens } from '../css/selector.js'
 import { tokenizeHtml, attrValue, elementRange, findOpeningTagsByAttribute, collectTagIndexes, attributeSignature, buildElementIndex } from './tokenizer.js'
+import { openTagDigest } from '../shared/digest.js'
 import { stripMarkup, normalizeWhitespaceText, normalizeWhitespaceWithMap } from '../shared/text.js'
 
 const REASON_UNRESOLVED = 'unresolved-element'
@@ -36,6 +37,12 @@ export function locateElementDetailed(content, edit) {
   const selector = typeof descriptor.selector === 'string' ? descriptor.selector : ''
   const outerHTML = typeof descriptor.outerHTML === 'string' ? descriptor.outerHTML : ''
   let ambiguous = false
+
+  // A server-issued handle is the only anchor that is not a heuristic: it names
+  // one opening tag in this file by offset + digest. It survives repeated
+  // markup, live-DOM drift, and a changed selector.
+  const byHandle = locateByHandle(content, tags, descriptor.handle)
+  if (byHandle) return { range: byHandle, reason: null }
 
   const byId = locateById(content, tags, selector, outerHTML)
   if (byId.range) return { range: byId.range, reason: null }
@@ -162,7 +169,14 @@ export function locateByOuterHtml(content, tags, outerHTML) {
  * selector. Reports ambiguous when several candidates fit equally well.
  */
 export function locateByTextBefore(content, tags, edit) {
-  const before = typeof edit.textBefore === 'string' ? edit.textBefore : ''
+  // Structure edits historically carried only `textSnippet`; accept it as the
+  // text anchor instead of silently skipping this ladder step.
+  const before =
+    typeof edit.textBefore === 'string' && edit.textBefore.trim() !== ''
+      ? edit.textBefore
+      : typeof edit.textSnippet === 'string'
+        ? edit.textSnippet
+        : ''
   if (before.trim() === '') return { range: null, ambiguous: false }
   const target = normalizeWhitespaceText(before)
   const tokens = compoundTokens(lastCompound(canonicalSelector(typeof edit.selector === 'string' ? edit.selector : '')))
@@ -225,7 +239,7 @@ export function locateByPath(content, tags, edit) {
   }
   const range = elementRange(content, tags, current)
   if (!range) return { range: null, reason: null }
-  if (!structureMatchesOuterHtml(content, range, edit.outerHTML)) return { range: null, reason: REASON_PATH_MISMATCH }
+  if (!structureMatchesOuterHtml(content, range, edit.outerHTML, edit.outerHTMLTruncated === true)) return { range: null, reason: REASON_PATH_MISMATCH }
   return { range, reason: null }
 }
 
@@ -235,19 +249,117 @@ export function locateByPath(content, tags, edit) {
  * texts must agree by containment (or by a shared head when outerHTML was
  * truncated by the runtime).
  */
-export function structureMatchesOuterHtml(content, range, outerHTML) {
+export function structureMatchesOuterHtml(content, range, outerHTML, truncatedHint) {
   if (typeof outerHTML !== 'string' || outerHTML.trim() === '') return true
   const outerOpen = tokenizeHtml(outerHTML).tags.find((tag) => !tag.closing)
   if (outerOpen && range.tag && range.tag.name !== outerOpen.name) return false
-  const truncated = /\u2026$/.test(outerHTML)
-  const targetText = normalizeWhitespaceText(stripMarkup(truncated ? outerHTML.slice(0, -1) : outerHTML))
+  const truncated = truncatedHint === true || /\u2026$/.test(outerHTML)
+  const targetText = normalizeWhitespaceText(stripMarkup(truncated ? outerHTML.replace(/\u2026$/, '') : outerHTML))
   const candidateText = normalizeWhitespaceText(stripMarkup(content.slice(range.innerStart, range.innerEnd)))
+  if (truncated) {
+    // A truncated payload must never *verify* a stale path by a text prefix: a
+    // 60-char head is shared by repeated components, so accepting it deleted the
+    // wrong element. Require the opening-tag attribute signature and the full
+    // visible text to agree instead.
+    if (!outerOpen) return false
+    if (attributeSignature(outerOpen.attrs) !== attributeSignature(range.tag.attrs)) return false
+    if (targetText === '') return candidateText === ''
+    return candidateText === targetText
+  }
   if (targetText === '' || candidateText === '') return true
   if (targetText.length < 8 || candidateText.length < 8) return true
   if (candidateText.indexOf(targetText) >= 0 || targetText.indexOf(candidateText) >= 0) return true
-  if (truncated) {
-    const head = targetText.slice(0, Math.min(60, targetText.length))
-    if (head.length >= 8 && candidateText.indexOf(head) >= 0) return true
-  }
   return false
+}
+
+/**
+ * Resolve a server-issued element handle against the current file bytes.
+ *
+ * A handle names one opening tag by (offset | line) + opening-tag digest. The
+ * exact offset wins; a line scan is the fallback so a handle survives unrelated
+ * edits earlier in the file. Anything not provably the same element returns
+ * null and the caller falls back to the normal ladder.
+ */
+export function locateByHandle(content, tags, handle) {
+  if (!handle || typeof handle !== 'object') return null
+  const digest = typeof handle.openTagDigest === 'string' ? handle.openTagDigest : ''
+  if (digest === '') return null
+  const digestOf = (range) => (range && range.tag ? openTagDigest(content.slice(range.tag.start, range.tag.end)) : '')
+  const openStart = Number(handle.openStart)
+  if (Number.isFinite(openStart) && openStart >= 0 && openStart <= content.length) {
+    for (let index = 0; index < tags.length; index += 1) {
+      if (tags[index].closing || tags[index].start !== openStart) continue
+      const range = elementRange(content, tags, index)
+      if (range && digestOf(range) === digest) return range
+    }
+  }
+  const line = Number(handle.line)
+  if (!Number.isFinite(line) || line < 1) return null
+  const found = []
+  let cursor = 0
+  let lineNo = 1
+  for (let index = 0; index < tags.length; index += 1) {
+    const tag = tags[index]
+    if (!tag || tag.closing) continue
+    while (cursor < tag.start && cursor < content.length) {
+      if (content.charCodeAt(cursor) === 10) lineNo += 1
+      cursor += 1
+    }
+    if (lineNo !== line) continue
+    const range = elementRange(content, tags, index)
+    if (range && digestOf(range) === digest) {
+      found.push(range)
+      if (found.length > 1) return null
+    }
+  }
+  return found.length === 1 ? found[0] : null
+}
+
+/**
+ * Last-resort match on the selector's final compound (tag + ids + classes).
+ *
+ * Structure anchors captured by the runtime may carry only a cssPath for a
+ * destination parent (e.g. the undo-insert target), with no id, no outerHTML and
+ * no DOM path. When exactly one source element matches the final compound it is
+ * a safe target; anything ambiguous stays unresolved.
+ */
+export function locateBySelectorTokens(content, tags, selector) {
+  const compound = lastCompound(canonicalSelector(typeof selector === 'string' ? selector : ''))
+  if (compound === '') return null
+  const tokens = compoundTokens(compound)
+  if (tokens.ids.length === 0 && tokens.classes.length === 0 && tokens.tag === '') return null
+  const matches = []
+  for (let index = 0; index < tags.length; index += 1) {
+    const tag = tags[index]
+    if (tag.closing || tag.selfClosing || VOID_ELEMENTS.has(tag.name)) continue
+    if (tokens.tag !== '' && tag.name !== tokens.tag) continue
+    const id = attrValue(tag, 'id')
+    const classAttr = attrValue(tag, 'class')
+    const classes = classAttr ? classAttr.split(/\s+/).filter(Boolean) : []
+    if (tokens.ids.length > 0 && (id === null || !tokens.ids.every((wanted) => id === wanted))) continue
+    if (tokens.classes.length > 0 && !tokens.classes.every((wanted) => classes.includes(wanted))) continue
+    const range = elementRange(content, tags, index)
+    if (!range) continue
+    matches.push(range)
+    if (matches.length > 1) return null
+  }
+  return matches.length === 1 ? matches[0] : null
+}
+
+/** The handle payload for one located element (issued after a successful write). */
+export function elementHandleAt(content, range) {
+  if (!range || !range.tag || typeof range.openStart !== 'number') return null
+  const openTag = content.slice(range.tag.start, range.tag.end)
+  const digest = openTagDigest(openTag)
+  if (digest === '') return null
+  let line = 1
+  for (let cursor = 0; cursor < range.openStart && cursor < content.length; cursor += 1) {
+    if (content.charCodeAt(cursor) === 10) line += 1
+  }
+  return {
+    openStart: range.openStart,
+    line,
+    tag: range.tag.name,
+    openTagDigest: digest,
+  }
 }

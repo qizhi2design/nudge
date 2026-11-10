@@ -1,0 +1,44 @@
+# 持续集成：每个 PR 和推送到 main 的提交都跑一遍构建 + 测试。
+#
+# 这个仓库的根目录就是 dsh.nudge 插件包本身（package.json 在根上），
+# 所以所有命令都直接在仓库根目录执行。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的旧流水线自动取消，避免排队浪费额度。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build lib/
+        run: npm run build
+
+      - name: Run tests
+        run: npm test

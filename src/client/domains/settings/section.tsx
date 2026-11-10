@@ -234,7 +234,14 @@ function NudgeSettingsSection(props) {
   var updateState = React.useState(null);
   var update = updateState[0];
   var setUpdate = updateState[1];
+  var updatingState = React.useState(false);
+  var updating = updatingState[0];
+  var setUpdating = updatingState[1];
   var aliveRef = React.useRef(true);
+
+  // 设置页打开时 `about` 会带回 Host 缓存的检查快照；手动检查/一键更新后
+  // `update` 状态覆盖它，避免重复的挂载 effect 把用户操作结果冲掉。
+  var updateView = update !== null ? update : about !== null && about.update !== undefined ? about.update : null;
 
   React.useEffect(function () {
     aliveRef.current = true;
@@ -267,6 +274,7 @@ function NudgeSettingsSection(props) {
 
   var loadAbout = React.useCallback(
     function () {
+      // 不带 check：Host 返回启动时缓存好的检查快照，设置页打开即显示结果。
       return call('about', { check: false }).then(
         function (next) {
           if (!aliveRef.current) return;
@@ -405,6 +413,54 @@ function NudgeSettingsSection(props) {
     );
   }
 
+  /**
+   * 一键更新：调用 Host 的 `nudge/update`，由 DSH pluginManager 从 npm registry
+   * 卸载旧版并安装精确新版。只有 Host 判定 update.status==='available' 时按钮才可点。
+   */
+  function runUpdate() {
+    if (updating) return;
+    var target = updateView !== null && updateView.latest ? String(updateView.latest) : '';
+    if (target === '') return;
+    setUpdating(true);
+    setUpdate({
+      status: 'updating',
+      installed: updateView !== null ? updateView.installed : undefined,
+      latest: target,
+    });
+    call('update', { version: target }).then(
+      function (result) {
+        if (!aliveRef.current) return;
+        setUpdating(false);
+        var status = result !== null && result !== undefined ? result.status : undefined;
+        if (status === 'updated' || status === 'restart-required') {
+          var to = result.to ? String(result.to) : target;
+          setUpdate({
+            status: status,
+            installed: to,
+            latest: target,
+            restart: result.restart === true || status === 'restart-required',
+            versions: [],
+          });
+          // The visible version row should show the version now on disk.
+          setAbout(function (previous) {
+            if (previous === null) return previous;
+            return Object.assign({}, previous, { version: to });
+          });
+          return;
+        }
+        setUpdate({
+          status: 'error',
+          message: String(result && result.message ? result.message : ''),
+        });
+      },
+      function (error) {
+        if (!aliveRef.current) return;
+        setUpdating(false);
+        setUpdate({ status: 'error', message: String(error && error.message ? error.message : error) });
+      },
+    );
+  }
+
   function switchControl(key, labelKey, hintKey, last) {
     var checked = settingsFeatureValue(config, key);
     var disabled = config === null || config.writable !== true || status === 'saving';
@@ -506,20 +562,32 @@ function NudgeSettingsSection(props) {
     var runtimeText = runtime && runtime.node ? 'Node ' + runtime.node + ' · ' + String(runtime.platform || '') + '/' + String(runtime.arch || '') : '—';
     var updateText = '';
     var updateTone = 'secondary';
-    if (update === null) {
+    if (updateView === null) {
       updateText = t('settings.updateUnchecked');
-    } else if (update.status === 'checking') {
+    } else if (updateView.status === 'checking') {
       updateText = t('settings.checking');
-    } else if (update.status === 'current') {
+    } else if (updateView.status === 'updating') {
+      updateText = t('settings.updating');
+    } else if (updateView.status === 'unchecked') {
+      updateText = t('settings.updateUnchecked');
+    } else if (updateView.status === 'current') {
       updateText = t('settings.updateCurrent');
-    } else if (update.status === 'available') {
-      updateText = t('settings.updateAvailable', { version: String(update.latest || '') });
-    } else if (update.status === 'unavailable') {
+    } else if (updateView.status === 'available') {
+      updateText = t('settings.updateAvailable', { version: String(updateView.latest || '') });
+    } else if (updateView.status === 'updated' || updateView.status === 'restart-required') {
+      updateText = t('settings.updateDone', { version: String(updateView.installed || updateView.latest || '') });
+      if (updateView.status === 'restart-required' || updateView.restart === true) {
+        updateText += ' · ' + t('settings.updateRestart');
+      }
+      updateTone = 'success';
+    } else if (updateView.status === 'unavailable') {
       updateText = t('settings.updateUnavailable');
-    } else if (update.status === 'error') {
-      updateText = t('settings.updateFailed', { message: String(update.message || '') });
+    } else if (updateView.status === 'error') {
+      updateText = t('settings.updateFailed', { message: String(updateView.message || '') });
       updateTone = 'error';
     }
+    var canUpdate = updateView !== null && updateView.status === 'available' && !checking && !updating;
+    var showUpdateButton = updateView !== null && (updateView.status === 'available' || updateView.status === 'updating');
     return h(
       'div',
       { style: Object.assign(settingsCardStyle(), { padding: '4px 16px 12px' }) },
@@ -538,19 +606,32 @@ function NudgeSettingsSection(props) {
             paddingTop: 10,
           },
         },
+        showUpdateButton
+          ? h(
+              'button',
+              {
+                type: 'button',
+                disabled: !canUpdate,
+                onClick: runUpdate,
+                style: settingsButtonStyle(true, !canUpdate),
+              },
+              updating || updateView.status === 'updating' ? t('settings.updating') : t('settings.updateNow'),
+            )
+          : null,
         h(
           'button',
           {
             type: 'button',
-            disabled: checking,
+            disabled: checking || updating,
             onClick: checkUpdates,
-            style: settingsButtonStyle(false, checking),
+            style: settingsButtonStyle(false, checking || updating),
           },
           checking ? t('settings.checking') : t('settings.checkUpdate'),
         ),
         h(
           'span',
           {
+            'data-dsh-nudge-update-status': updateView !== null && updateView.status ? String(updateView.status) : 'none',
             style: {
               flex: 1,
               minWidth: 0,
@@ -564,6 +645,9 @@ function NudgeSettingsSection(props) {
           updateText,
         ),
       ),
+      updateView !== null && updateView.status === 'updating'
+        ? h('div', { style: Object.assign(settingsHintStyle(), { paddingTop: 4 }) }, t('settings.updateProgress'))
+        : null,
       h('div', { style: Object.assign(settingsHintStyle(), { paddingTop: 8 }) }, t('settings.updateHint')),
       aboutError ? h('div', { style: Object.assign(settingsHintStyle(), { paddingTop: 4, color: 'var(--dsw-alias-state-error-primary)' }) }, t('settings.aboutFailed', { message: aboutError })) : null,
     );

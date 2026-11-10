@@ -1,8 +1,7 @@
 {
   "name": "dsh.nudge",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Nudge for DSH Desktop: point at anything in the right-sidebar browser, annotate it for the agent, or nudge its styles, text and attributes until it looks right.",
+  "version": "1.0.0",
+  "description": "Nudge: point at anything on a web page, leave a note for your AI assistant, or fine-tune its styles and text until it looks right.",
   "keywords": [
     "dsh-plugin",
     "dsh",
@@ -10,9 +9,22 @@
     "nudge",
     "browser",
     "annotation",
-    "devtools"
+    "ui-design",
+    "product-design"
   ],
   "license": "MIT",
+  "author": "Purity3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qizhi2design/nudge.git"
+  },
+  "homepage": "https://github.com/qizhi2design/nudge#readme",
+  "bugs": {
+    "url": "https://github.com/qizhi2design/nudge/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -80,6 +92,7 @@
     "build:host": "node scripts/build-host.mjs",
     "build:client": "node scripts/build-client.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node test/client-smoke.mjs && node test/floating-composer.test.mjs && node test/host-bar-parity.test.mjs && node test/client-theme.test.mjs && node test/settings-page.test.mjs && node test/workspace-panel.test.mjs && node test/clip-annotations.test.mjs && node test/runtime-smoke.mjs && node test/source-sync.test.mjs && node test/workspace-domain.test.mjs && node test/host-integration.test.mjs && node test/workspace-e2e.test.mjs"
+    "test": "node test/client-smoke.mjs && node test/brand-icon.test.mjs && node test/toolbar-hot-reload.test.mjs && node test/dock-panel.test.mjs && node test/floating-composer.test.mjs && node test/host-bar-parity.test.mjs && node test/client-theme.test.mjs && node test/settings-page.test.mjs && node test/workspace-panel.test.mjs && node test/clip-annotations.test.mjs && node test/runtime-smoke.mjs && node test/source-sync.test.mjs && node test/workspace-domain.test.mjs && node test/host-integration.test.mjs && node test/workspace-e2e.test.mjs",
+    "market:index": "node scripts/market-index.mjs"
   }
 }

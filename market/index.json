@@ -1,0 +1,86 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Nudge",
+    "zh": "轻推"
+  },
+  "description": {
+    "en": "Point at anything on a web page, leave a note for your AI assistant, or fine-tune its styles and text until it looks right.",
+    "zh": "在网页上点选任意元素，给 AI 助教留一条批注，或者直接把它调成你想要的样子。"
+  },
+  "metadata": {
+    "categories": {
+      "design": {
+        "title": {
+          "en": "Design",
+          "zh": "设计"
+        }
+      },
+      "productivity": {
+        "title": {
+          "en": "Productivity",
+          "zh": "效率"
+        }
+      }
+    },
+    "labels": {
+      "design": {
+        "title": {
+          "en": "Design",
+          "zh": "设计"
+        }
+      },
+      "annotation": {
+        "title": {
+          "en": "Annotation",
+          "zh": "批注"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh.nudge",
+      "title": {
+        "en": "Nudge",
+        "zh": "轻推"
+      },
+      "description": {
+        "en": "Point at anything on a web page, leave a note for your AI assistant, or fine-tune its styles and text until it looks right.",
+        "zh": "在网页上点选任意元素，给 AI 助教留一条批注，或者直接把它调成你想要的样子。"
+      },
+      "icon": "https://raw.githubusercontent.com/qizhi2design/nudge/main/icon.svg",
+      "author": "Purity3",
+      "homepage": "https://github.com/qizhi2design/nudge",
+      "repository": {
+        "url": "https://github.com/qizhi2design/nudge"
+      },
+      "metadata": {
+        "category": "design",
+        "keywords": [
+          "ui-design",
+          "product-design",
+          "annotation",
+          "browser",
+          "design-review"
+        ],
+        "labels": [
+          "design",
+          "annotation"
+        ]
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishTimestamp": 1794316758,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.0"
+          }
+        }
+      ]
+    }
+  ]
+}

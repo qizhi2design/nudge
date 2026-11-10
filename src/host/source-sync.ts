@@ -26,20 +26,42 @@
  * deps = { fs, cwd, sourceRoot, urlRoot, page, edits, policy, maxScanFiles, maxFileBytes }
  *
  * EditRecord = {
- *   id, kind: 'style'|'text'|'attr'|'remove'|'move', selector, path?, property?, value?,
+ *   id, kind: 'style'|'text'|'attr'|'remove'|'move'|'insert', selector, path?, property?, value?,
  *   before?, after?, textBefore?, textAfter?, attrName?, attrBefore?, attrAfter?,
- *   outerHTML?, textSnippet?, sourceHints?: { file?, line?, styleHref?, styleSelector? },
- *   targetParentSelector?, targetParentOuterHTML?, targetParentTextBefore?,
- *   beforeSelector?, beforeOuterHTML?, beforeTextBefore?,
+ *   outerHTML?, outerHTMLTruncated?, textSnippet?,
+ *   sourceHints?: { file?, line?, styleHref?, styleSelector? },
+ *   handle?: { openStart, line, tag, openTagDigest },
+ *   targetParentSelector?, targetParentPath?, targetParentOuterHTML?, targetParentTextBefore?,
+ *   beforeSelector?, beforePath?, beforeOuterHTML?, beforeTextBefore?,
+ *   html?,
  * }
  *
  * remove deletes the located element's whole extent; move cuts it from the same
  * markup file and re-inserts it before `beforeSelector` (or appends it to
- * `targetParentSelector` when that is null). Both endpoints must resolve
- * uniquely; otherwise the edit reports preview/unresolved and writes nothing.
+ * `targetParentSelector` when that is null); insert writes a captured `html`
+ * snippet back (inverse of remove). A destination/anchor may also be addressed
+ * by its runtime DOM path (`targetParentPath` / `beforePath`) as a last resort.
+ * Both endpoints must resolve uniquely; otherwise the edit reports
+ * preview/unresolved and writes nothing.
+ *
+ * `handle` is a server-issued identity returned in the result of a previous
+ * successful edit: `{ openStart, line, tag, openTagDigest }`. When it still
+ * matches the file it bypasses the heuristic locator entirely, which makes a
+ * second edit on repeated markup deterministic.
+ *
+ * Routing is candidate-based: hints -> URL mapping -> bounded search. A hint (or
+ * an existing mapped file) that resolves but does not contain the element does
+ * NOT terminate the edit; the remaining candidates are probed in order.
+ * Structural kinds (remove/move/insert) only patch markup files
+ * (html/htm/vue/svelte/astro); JS/TSX sources are refused with
+ * `unsupported-js-source` because an HTML tokenizer cannot cut JSX safely.
  *
  * Result = {
- *   results: [{ id, status: 'synced'|'preview'|'failed', file?, line?, strategy?, reason?, message? }],
+ *   results: [{
+ *     id, status: 'synced'|'preview'|'failed', file?, line?, strategy?, reason?, message?,
+ *     handle?: { openStart, line, tag, openTagDigest },
+ *     candidates?: [{ file, why }],
+ *   }],
  *   files?: string[], warnings?: string[],
  * }
  *

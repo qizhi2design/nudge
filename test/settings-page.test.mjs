@@ -468,6 +468,80 @@ function lastCall(calls, endpoint) {
   assert(checkedCalls.length === 1, 'update check asks the Host with check=true exactly once')
 }
 
+// ----------------------------------------------------- one-click update
+// The Host caches the startup check, so mounting the page shows the available
+// version without a manual "check" call; clicking "Update now" drives the new
+// `nudge/update` remote and must cover success and failure.
+
+function updateAvailableAbout() {
+  return Object.assign({}, ABOUT, {
+    update: { status: 'available', installed: '0.2.0', latest: '0.3.0', versions: ['0.3.0'], registry: 'npm' },
+  })
+}
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  let resolveUpdate = null
+  let updateArgs = null
+  const remote = createRemote((endpoint, args) => {
+    if (endpoint === 'config') return SNAPSHOT
+    if (endpoint === 'about') return updateAvailableAbout()
+    if (endpoint === 'update') {
+      updateArgs = args
+      return new Promise((resolvePromise) => {
+        resolveUpdate = resolvePromise
+      })
+    }
+    return behavior(endpoint, args)
+  })
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updateNow'))
+  assert(textOf(view.tree).includes('settings.updateNow'), 'cached startup snapshot renders the Update now button')
+  const checkedCalls = remote.calls.filter((entry) => entry.name === 'nudge/about' && entry.args && entry.args.check === true)
+  assert(checkedCalls.length === 0, 'mounting the page reads the cached snapshot without re-checking the registry')
+
+  buttonByText(view.tree, 'settings.updateNow').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updating'))
+  assert(textOf(view.tree).includes('settings.updating'), 'clicking Update now enters the updating state')
+  assert(textOf(view.tree).includes('settings.updateProgress'), 'the updating state explains what is happening')
+  assert(updateArgs !== null && updateArgs.version === '0.3.0', 'Update now asks for the advertised version')
+
+  resolveUpdate({ status: 'restart-required', from: '0.2.0', to: '0.3.0', restart: true })
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updateDone'))
+  const doneText = textOf(view.tree)
+  assert(doneText.includes('settings.updateDone'), 'a successful update reports the installed version')
+  assert(doneText.includes('0.3.0'), 'the success status names the new version')
+  assert(doneText.includes('settings.updateRestart'), 'a restart-required update asks for a DSH restart')
+  assert(!doneText.includes('settings.updateNow'), 'the primary update button disappears after success')
+}
+
+{
+  runtime.reset()
+  exportsObject.__test.setPluginConfig({ language: 'auto' }, null)
+  const remote = createRemote((endpoint, args) => {
+    if (endpoint === 'config') return SNAPSHOT
+    if (endpoint === 'about') return updateAvailableAbout()
+    if (endpoint === 'update') return { status: 'failed', from: '0.2.0', to: '0.3.0', message: 'registry unreachable' }
+    return behavior(endpoint, args)
+  })
+  ctx.connection = { rpc: { call: remote.call } }
+  const props = sectionProps()
+  runtime.render(sectionEntry.component, props)
+  await flush()
+  let view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updateNow'))
+  buttonByText(view.tree, 'settings.updateNow').props.onClick()
+  view = await settle(sectionEntry.component, props, runtime, (tree) => textOf(tree).includes('settings.updateFailed'))
+  const failedText = textOf(view.tree)
+  assert(failedText.includes('settings.updateFailed'), 'a failed update uses the generic update-failed status')
+  assert(failedText.includes('registry unreachable'), 'a failed update keeps the Host reason')
+  assert(!failedText.includes('settings.updateDone'), 'a failed update never claims success')
+  assert(failedText.includes('settings.checkUpdate'), 'the manual check button remains available after a failure')
+}
+
 // ---------------------------------------------------------------- read-only
 
 {

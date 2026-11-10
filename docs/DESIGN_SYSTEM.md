@@ -54,6 +54,7 @@ comment ──[Esc / ×]──> browse
 | Design card 圆角 | `22px` |
 | Comment card 圆角 | `14px` |
 | Marker 尺寸 | `26 × 26px`，`border-radius: 50% 50% 50% 3px` |
+| 光标归属 | 页面内用自绘 26px 光标（`overlay.marker`）；指针落在自有面板（样式卡 / Composer / 底部条 / pin）上时让位给系统原生光标（overlay root `cursor: auto`，覆盖页面级 `cursor: none`），并隐藏页面 hover 框与 metadata，避免在面板上画「点击样式」 |
 | Input 圆角 | `8–10px` |
 | 正文 | `13px / 1.5` |
 | 小字 | `11px / 1.35` |
@@ -66,7 +67,7 @@ comment ──[Esc / ×]──> browse
 
 宿主只负责地址栏、标注 / 编辑开关、撤销重做；页面内浮层使用与 `isDark` 对应的 Codex 表面（见 2.1），两套 palette 由宿主通过 `setTheme(palette)` 推入注入层——因此宿主工具栏与页面浮层始终同时跟随 DSH 主题，而不是各自独立换肤。
 
-宿主工具栏固定两行：第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往，38px），第二行是轻推操作栏（标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 外部，34px）。两行都用 `--dsw-alias-bg-base` + `.5px` 分隔线，按钮 28px、圆角 `--dsw-radius-sm`，与 DSH 内置 Browser 工具栏一致；<460px 时第二行标签收成图标，<430px 时第一行收起前进与「前往」。Tab 标题注册 `sidebar.right.pane.tab.title`，用 `currentColor` 的轻推标记（`NudgeMark`）加标题，与内置 Browser chip 的「图标 + 标题」结构一致。
+宿主工具栏固定两行：第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往，38px），第二行是轻推操作栏（标注 / 编辑、DOM / 工作区 / 自动刷新、撤销 / 重做 / 外部，34px）。两行都用 `--dsw-alias-bg-base` + `.5px` 分隔线，按钮 28px、圆角 `--dsw-radius-sm`，与 DSH 内置 Browser 工具栏一致。第二行按可用宽度分三档：≥580px 时「标注 / 编辑」「DOM 树 / 工作区版本」「自动刷新」全部显示图标 + 文案；460–579px 时 DOM 树 / 工作区版本保留图标，其余仍有文案；<460px 时全部标签收成图标（自动刷新保留选中底色），<430px 时第一行收起前进与「前往」。自动刷新不是普通图标按钮，而是「图标 + 文案」的选中态 pill：开启时 accent tint + accent 描边，关闭时中性描边 + 无底色，点击后 1.4s 文案闪出「已开启 / 已关闭」，有待刷新更新时切到 warn tint + 呼吸描边；不额外画开关轨道，选中/取消本身就是状态。宿主右侧的「DOM 树 / 工作区版本」不再并排占宽，而是共用一套右侧 Dock：一次只显示一个面板（顶部一级 Tab 切换），默认停靠 300px、可拖拽 240–420px 并记忆；侧栏可用宽度 <760px 时自动改为浮层抽屉（320px，覆盖页面但不挤压，Esc 关闭）。工作区在无 git 时隐藏「版本 / 提交」两个二级 Tab，并把仓库提示收进文件列表。Tab 标题注册 `sidebar.right.pane.tab.title`，用 `currentColor` 的轻推标记（`NudgeMark`）加标题，与内置 Browser chip 的「图标 + 标题」结构一致。
 
 浏览器引导卡片的「打开浏览器 / 在轻推中打开」子菜单使用 DSH 菜单表面：`--dsw-specific-menu` + `--dsw-menu-backdrop-filter` + `--dsw-elevation-prominent`，容器 `--dsw-radius-lg`、`4px` 内边距，行高 40px、圆角 `--dsw-radius-md`、hover 用 `--dsw-alias-interactive-bg-hover`；不再使用 `--dsw-alias-bg-overlay`（那是遮罩色，不是菜单表面）。
 
@@ -75,9 +76,13 @@ comment ──[Esc / ×]──> browse
 | 组件 | 落点 | 规则 |
 | --- | --- | --- |
 | `ModeToggle` | 宿主工具栏 | 「标注 / 编辑」两个一级开关；激活态 tinted pill；`aria-pressed` |
+| `PanelToggle` | 宿主工具栏 | DOM 树 / 工作区版本入口：宽屏（≥580px）显示图标 + 文案的选中态 pill，中等宽度回到 28×28 图标按钮；`aria-pressed` 表示面板开合 |
+| `HotReloadToggle` | 宿主工具栏 | 自动刷新选中态 pill：图标 + 文案；选中 = accent tint / accent 描边 / accent 文字，取消 = 中性描边 / 无底色；点击文案闪 1.4s「已开启 / 已关闭」；pending = warn tint + 呼吸描边（`prefers-reduced-motion` 关闭）；`aria-pressed` + `data-hot-reload-state`，窄屏收起文案但保留选中底色 |
 | `IconButton` | 宿主工具栏 | 28×28，圆角 6，hover 用 `theme.layer2` |
 | `TextButton` | 宿主补充入口 | 主按钮使用 DSH primary，次按钮透明 |
-| `DomTreePanel` | 宿主 Client | 页面右侧 272px 侧边栏；懒加载 DOM 树、选中高亮、点节点聚焦（`focusDomPath`）；工具栏 ListTree 开关 |
+| `NudgeDock` | 宿主 Client | 右侧单面板 Dock：DOM 树 / 工作区一级 Tab、单一关闭；停靠宽 300（可拖 240–420、双击/Home 复位、`localStorage` 记忆），宿主宽 <760 自动浮层（320px、Esc 关闭、页面不缩）；`role=separator` 支持方向键调宽；拖动时固定层 `data-dockkit-pointer` 接管 webview 上的指针事件 |
+| `DomTreePanel` | 宿主 Client | 嵌入 Dock 的内容面板（非嵌入时保留 272px aside 供测试）；懒加载 DOM 树、选中高亮、点节点聚焦（`focusDomPath`）；嵌入时隐藏自带头部与关闭 |
+| `NudgeWorkspacePanel` | 宿主 Client | 嵌入 Dock 的文件 / 版本 / 提交面板（非嵌入时 300px）；嵌入时头部由 Dock 提供，刷新进入 Dock 头部；无 git 时隐藏「版本 / 提交」并只用一行提示；文件父目录 hover 才显示 |
 | `ShortcutKeys` / `Keycap` | 宿主工具栏 / 快捷键表 / 交互 tooltip | 键帽尺寸 18–20px、圆角 6px、`.5px` 边框、`--dsw-alias-bg-module-platform` 表面；⌘ / ⌥ / ⇧ / Space 用 lucide 图标（`Command` / `Option` / `ArrowBigUp` / `Space` / `CornerDownLeft`），Ctrl、字母、标点保留文本；顺序与 DSH 快捷键面板一致（control → alt → shift → meta） |
 | `ShortcutSheet` | 工具栏底部 | 键盘按钮展开的当前生效键位表：普通行 24px、标签左对齐、键帽右对齐，只读 Space 行单独分组；展开时撑高工具栏而不是覆盖 webview |
 | `ModeHintContent` | 标注 / 编辑按钮的 hover tooltip | 两行居中提示：点击 / 拖拽说明 +「按住 Space 临时操作网页」，Space 用 lucide 键帽；不再有工具栏下方的常驻通知条。tooltip 由宿主自绘 fixed 卡片（不是 Radix popper），因为 DSH Electron 渲染器里 portalled popper 会停在 `translate(0,-200%)` 屏外；卡片优先出现在 toolbar 上方，空间不足时贴顶显示，若超出 220px 内部滚动。卡片配色跟随宿主主题：Light 用 `--dsw-alias-bg-overlay`（#e9ecf2）+ `--dsw-alias-label-primary` 深色文字，Dark 用 `--dsw-alias-tooltip-bg`（#2c2c2e）+ 浅色文字；边框/阴影同步切换，keycap 仍用 `--dsw-alias-bg-module-platform` / `--dsw-alias-label-secondary` |
@@ -97,12 +102,28 @@ comment ──[Esc / ×]──> browse
 
 宿主侧已经是正式 TSX 组件层：先 `npm run typecheck`，再 `npm run build`（esbuild + Tailwind）生成 `lib/client.js`。页面注入层仍保持 Vanilla。
 
+### 4.1 品牌标记（`icon.svg` / `NudgeMark`）
+
+产品身份只用一个标记：**浏览器窗口 + 放大镜**。彩色版是插件包 / 产品卡片用的 `icon.svg`，单色版是宿主 UI 内跟随主题的 React 组件 `NudgeMark`（`src/client/ui/icons.ts`）——两者是**同一套 24 单位几何**的两种画法，改其中一个必须同时改另一个。
+
+| 项 | 规则 |
+| --- | --- |
+| 几何 | 24 单位盒：窗口 `rect 2.5,3 12×9 r2.3`（stroke 1.8）+ 内容线 `M6 6.4h3.2M6 8.4h2`（1.6，opacity .5）+ 镜片 `circle 16.2,16 r3.5`（2）+ 手柄 `M18.8 18.6 21 20.8`（2.2，圆头） |
+| 彩色版 | `icon.svg`（`dsh.nudge/icon` 导出）：`#141821` 圆角底板 + 62×62 渐变内描边；窗口 / 镜片 / 手柄用 `#6ea8ff → #7c5cff` 渐变，内容线用中性灰 `#8b93a7`；`role="img"` + `aria-label="Nudge"` + `<title>Nudge · 轻推</title>` |
+| 单色版 | `NudgeMark`：`viewBox 0 0 24 24`、`stroke: currentColor`、`stroke-linecap/linejoin: round`；24 盒与 Lucide 同重，因此能和 Lucide 图标并排而不显粗 |
+| 出现位置 | Tab chip 标题（`sidebar.right.pane.tab.title`）、Browser 引导卡「在轻推中打开」、浏览器标签 ⋮ 菜单「在轻推中打开」、链接右键菜单、设置 → 轻推左侧导航（`settings.section.icon`） |
+| 尺寸 | 13 / 15 / 16 px（菜单与导航）到 96px（图标总览）；15–16px 下镜片与窗口仍可分辨 |
+| 约束 | 品牌位不再退回通用光标图标；不改用第二套自绘路径；`test/brand-icon.test.mjs` 逐形状校验 `icon.svg` 与 `NudgeMark` 几何一致，并校验五个身份位都用同一枚标记 |
+| 证据 | `docs/evidence/25-brand-icon.png`（多尺寸 × Light/Dark × 身份位，由 `../validation/brand-cdp.mjs` 从 `icon.svg` 现场渲染） |
+
+![品牌标记总览](evidence/25-brand-icon.png)
+
 ## 5. 验收
 
 - 页面浮层只出现一套 Codex 表面，且与宿主当前主题一致：Light 为白色表面 + 深色文字，Dark 为 `#2f2f2f` / `#262626` 表面 + 浅色文字；Composer / Design / Bar 圆角与阴影一致。
 - 宿主切换 DSH Light / Dark 后：工具栏、DOM 树、clip 卡片即时重渲染（无需刷新）；已打开的 Composer、底部批注条、pin 与 metadata 浮层同步换色；样式卡按新主题重建。
 - 页面只显示编号 pin；底部条负责定位 / 隐藏标记 / 丢弃 / 发送 / 退出。
-- 所有图标（宿主 React 组件与注入层）都来自 Lucide，不手绘图标路径。
+- 除品牌标记（`NudgeMark` / `icon.svg`，唯一一套自绘路径，两者几何一致）外，所有图标（宿主 React 组件与注入层）都来自 Lucide，不手绘图标路径。
 - 文字拖选后出现蓝色选区 + 编号 pin + 评论卡；元素 / 区域同样走同一套保存链路。
 - `prefers-reduced-motion: reduce` 时无过渡动画。
 - 宿主工具栏有「标注 / 编辑」两个一级开关；两者共享 Composer / design card；没有右侧属性 Dock。

@@ -20,6 +20,9 @@
 							display: 'block',
 							visibility: 'visible',
 							opacity: '1',
+							// The page-wide `cursor: none` is inherited into the overlay; our own
+							// panel controls are regular UI, so they keep the native cursor.
+							cursor: 'auto',
 							margin: '0px',
 							padding: '0px',
 							border: '0px',

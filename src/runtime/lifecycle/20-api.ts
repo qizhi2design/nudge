@@ -49,6 +49,39 @@
 		}
 		return !1
 	}
+	/** Insert HTML at a structural anchor; returns the inserted element's selector. */
+	function applyInsert(spec) {
+		if (destroyed) return { ok: !1, reason: 'destroyed' }
+		var request = spec || {}
+		try {
+			// Accept both spellings the client uses for the target container.
+			var parentSelector = request.parentSelector != null ? request.parentSelector : request.targetParentSelector,
+				parentPath = request.parentPath != null ? request.parentPath : request.targetParentPath,
+				parent = resolveStructureElement(parentSelector, parentPath),
+				before = request.beforeSelector != null || request.beforePath != null ? resolveStructureElement(request.beforeSelector, request.beforePath) : null,
+				outcome = applyInsertTo(parent, before, request.html)
+			if (!outcome || !outcome.ok) return { ok: !1, reason: (outcome && outcome.reason) || 'write-failed' }
+			return { ok: !0, selector: cssPath(outcome.inserted) }
+		} catch {
+			return { ok: !1, reason: 'write-failed' }
+		}
+	}
+	/** Move a previously anchored element by its runtime key; returns its new selector. */
+	function applyMoveElement(spec) {
+		if (destroyed) return { ok: !1, reason: 'destroyed' }
+		var request = spec || {}
+		try {
+			var parentSelector = request.parentSelector != null ? request.parentSelector : request.targetParentSelector,
+				parentPath = request.parentPath != null ? request.parentPath : request.targetParentPath,
+				parent = resolveStructureElement(parentSelector, parentPath),
+				before = request.beforeSelector != null || request.beforePath != null ? resolveStructureElement(request.beforeSelector, request.beforePath) : null,
+				outcome = applyMoveByKey(request.elementKey, parent, before)
+			if (!outcome || !outcome.ok) return { ok: !1, reason: (outcome && outcome.reason) || 'write-failed' }
+			return { ok: !0, selector: cssPath(outcome.moved) }
+		} catch {
+			return { ok: !1, reason: 'write-failed' }
+		}
+	}
 
 	/**
 	 * Host overlay-safe area, in CSS pixels, measured from the page bottom.
@@ -107,6 +140,8 @@
 		applyText,
 		applyAttr,
 		reapply,
+		applyInsert,
+		applyMoveElement,
 		locate,
 		setLocale,
 		setTheme,

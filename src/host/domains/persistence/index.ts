@@ -8,12 +8,16 @@
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { READ_LIMIT, DEFAULT_SCAN_LIMIT } from './constants.js'
-import { applyMarkupTextEdit, applyMarkupAttrEdit, applyMarkupRemoveEdit, applyMarkupMoveEdit } from './edits/markup.js'
+import { applyMarkupTextEdit, applyMarkupAttrEdit, applyMarkupRemoveEdit, applyMarkupMoveEdit, applyMarkupInsertEdit } from './edits/markup.js'
 import { applyCssRuleEdit, applyHtmlOverrideEdit, applyTemplateStyleEdit } from './edits/style.js'
 import { derivePageMapping, hintToRelativePath, resolveSourceFile, resolveFileUnderRoot, tooLargeFailure } from './planning/mapping.js'
 import { searchForEdit, findBasenameCandidates, inspectSearchTarget } from './planning/search.js'
-import { strategyFor, normalizeKind, validateEditShape } from './planning/validate.js'
+import { strategyFor, normalizeKind, validateEditShape, isJsSourceExtension } from './planning/validate.js'
 import { lineAt, editId, pathOf, statOrUndefined, workspaceRelative, reasonOf } from './shared/paths.js'
+import { locateElementDetailed, elementHandleAt } from './html/locate.js'
+
+/** Kinds whose patch replaces a whole element extent (and therefore issues a handle). */
+const HANDLE_KINDS = new Set(['text', 'attr', 'move', 'insert'])
 
 /**
  * Persist one batch of live visual edits into workspace source files.
@@ -114,31 +118,71 @@ export async function syncEdits(deps) {
     addWarning,
     candidateCache: null,
     searchMemo: new Map(),
+    probeCache: new Map(),
   }
 
   // ------------------------------------------------------------ plan per edit
+  // Every edit collects an ORDERED candidate list (hint -> URL mapping -> search)
+  // and is written into the first candidate whose file actually contains the
+  // element. A hint is provenance, not a fact: when the hinted file resolves but
+  // the element is absent there, the remaining candidates still run.
   const groups = new Map()
   for (let index = 0; index < editList.length; index += 1) {
     const edit = editList[index] && typeof editList[index] === 'object' ? editList[index] : {}
     try {
-      const outcome = await planEdit(ctx, edit, mapping)
-      if (outcome.plan) {
-        const plan = outcome.plan
-        const key = pathOf(fs, plan.target)
-        let group = groups.get(key)
-        if (!group) {
-          group = { target: plan.target, relativePath: plan.relativePath, edits: [] }
-          groups.set(key, group)
+      const planned = await planCandidates(ctx, edit, mapping)
+      if (!planned.plans || planned.plans.length === 0) {
+        results[index] = describeNoPlan(ctx, edit, planned)
+        continue
+      }
+
+      let chosen = null
+      let firstFailure = null
+      const candidates = []
+      for (const plan of planned.plans) {
+        const probe = await probePlan(ctx, plan, edit)
+        if (probe.ok) {
+          chosen = plan
+          firstFailure = null
+          break
         }
-        if (plan.allowCreate) group.allowCreate = true
-        group.edits.push({ index, edit, strategy: plan.strategy, via: plan.via })
+        candidates.push({ file: plan.relativePath, why: probe.reason })
+        if (!firstFailure) firstFailure = { reason: probe.reason, file: plan.relativePath }
+      }
+
+      if (!chosen) {
+        // A JS/JSX candidate is refused on purpose (no HTML tokenizer over
+        // component code). Report that instead of a generic locate miss so the
+        // user learns the real limit and the candidate list stays actionable.
+        const blocked = Array.isArray(planned.blocked) ? planned.blocked : []
+        if (blocked.length > 0) {
+          results[index] = {
+            id: editId(edit),
+            status: 'preview',
+            reason: 'unsupported-js-source',
+            file: blocked[0].file,
+            candidates: candidates.concat(blocked),
+          }
+          continue
+        }
+        results[index] = {
+          id: editId(edit),
+          status: 'preview',
+          reason: (firstFailure && firstFailure.reason) || 'unresolved-element',
+          file: (firstFailure && firstFailure.file) || null,
+          candidates,
+        }
         continue
       }
-      if (outcome.failed) {
-        results[index] = { id: editId(edit), status: 'failed', ...outcome.failed }
-        continue
+
+      const key = pathOf(fs, chosen.target)
+      let group = groups.get(key)
+      if (!group) {
+        group = { target: chosen.target, relativePath: chosen.relativePath, edits: [] }
+        groups.set(key, group)
       }
-      results[index] = { id: editId(edit), status: 'preview', ...(outcome.preview || { reason: 'no-source-mapping' }) }
+      if (chosen.allowCreate) group.allowCreate = true
+      group.edits.push({ index, edit, strategy: chosen.strategy, via: chosen.via })
     } catch (error) {
       results[index] = { id: editId(edit), status: 'failed', reason: 'internal-error', message: reasonOf(error) }
     }
@@ -166,20 +210,92 @@ export async function syncEdits(deps) {
   return { results, files, warnings }
 }
 
+function describeNoPlan(ctx, edit, planned) {
+  if (planned && planned.failed) return { id: editId(edit), status: 'failed', ...planned.failed }
+  const reason = (planned && planned.preview && planned.preview.reason) || 'no-source-mapping'
+  return { id: editId(edit), status: 'preview', reason }
+}
+
 /**
- * Decide which source file one edit targets and which textual strategy applies.
- * Order: explicit hints -> URL mapping -> bounded fallback search.
+ * Read a candidate target once for the planning probe (stat + content).
+ * Returns `{ ok:true, content }` or `{ ok:false, reason }` without writing.
  */
-export async function planEdit(ctx, edit, mapping) {
+async function readProbeContent(ctx, plan) {
+  const key = pathOf(ctx.fs, plan.target)
+  if (ctx.probeCache.has(key)) return ctx.probeCache.get(key)
+  let entry
+  try {
+    const info = await statOrUndefined(ctx.fs, plan.target)
+    if (info !== undefined && info.type !== 'file') {
+      entry = { ok: false, reason: 'unsupported-source-type' }
+    } else if (info !== undefined && typeof info.size === 'number' && info.size > ctx.readLimit) {
+      entry = { ok: false, reason: 'file-too-large' }
+    } else if (info === undefined && !plan.allowCreate) {
+      entry = { ok: false, reason: 'file-missing' }
+    } else {
+      let raw = ''
+      if (info !== undefined) raw = await ctx.fs.readText(plan.target)
+      if (typeof raw !== 'string') raw = ''
+      if (raw.length > ctx.readLimit) {
+        entry = { ok: false, reason: 'file-too-large' }
+      } else {
+        const bom = raw.startsWith('\uFEFF') ? '\uFEFF' : ''
+        entry = { ok: true, content: bom ? raw.slice(1) : raw }
+      }
+    }
+  } catch (error) {
+    entry = { ok: false, reason: 'read-failed', message: reasonOf(error) }
+  }
+  ctx.probeCache.set(key, entry)
+  return entry
+}
+
+/** Dry-run one candidate: locate + patch in memory. Never writes. */
+async function probePlan(ctx, plan, edit) {
+  const content = await readProbeContent(ctx, plan)
+  if (!content.ok) return content
+  let outcome
+  try {
+    outcome = applyEditToContent(content.content, { edit, strategy: plan.strategy })
+  } catch (error) {
+    return { ok: false, reason: 'internal-error', message: reasonOf(error) }
+  }
+  if (!outcome || outcome.ok !== true) {
+    return { ok: false, reason: (outcome && outcome.reason) || 'unresolved-element' }
+  }
+  return { ok: true, outcome }
+}
+
+/**
+ * Decide which source files one edit may target, in priority order.
+ * Order: explicit hints -> URL mapping -> bounded fallback search.
+ * Returns `{ plans, failed?, preview? }`; the caller probes each plan in order.
+ */
+export async function planCandidates(ctx, edit, mapping) {
   const kind = normalizeKind(edit.kind)
-  if (!kind) return { preview: { reason: 'unsupported-edit-kind' } }
+  if (!kind) return { plans: [], preview: { reason: 'unsupported-edit-kind' } }
+  // `insert` replays a captured snippet and is addressed by its destination
+  // parent, so it may legitimately carry no element selector.
   const selector = typeof edit.selector === 'string' ? edit.selector.trim() : ''
-  if (!selector) return { preview: { reason: 'unresolved-element' } }
-  if (!validateEditShape(kind, edit)) return { preview: { reason: 'invalid-edit' } }
+  if (!selector && kind !== 'insert') return { plans: [], preview: { reason: 'unresolved-element' } }
+  if (!validateEditShape(kind, edit)) return { plans: [], preview: { reason: 'invalid-edit' } }
 
   const hints = edit.sourceHints && typeof edit.sourceHints === 'object' ? edit.sourceHints : {}
-  let sawUnsupported = false
+  const isStructure = kind === 'remove' || kind === 'move' || kind === 'insert'
+  const plans = []
+  const seen = new Set()
   let oversized = null
+  let sawUnsupported = false
+  let sawJs = false
+  const blocked = []
+
+  const push = (plan) => {
+    if (!plan) return
+    const key = pathOf(ctx.fs, plan.target)
+    if (seen.has(key)) return
+    seen.add(key)
+    plans.push(plan)
+  }
 
   const consider = (resolved, via, allowCreate) => {
     if (!resolved || resolved.ok !== true) {
@@ -188,30 +304,26 @@ export async function planEdit(ctx, edit, mapping) {
     }
     const strategy = strategyFor(kind, resolved.ext)
     if (!strategy) {
+      if (isStructure && isJsSourceExtension(resolved.ext)) {
+        sawJs = true
+        if (resolved.relativePath && !blocked.some((entry) => entry.file === resolved.relativePath)) {
+          blocked.push({ file: resolved.relativePath, why: 'unsupported-js-source' })
+        }
+      }
       sawUnsupported = true
       return null
     }
     return {
-      plan: {
-        target: resolved.target,
-        info: resolved.info,
-        ext: resolved.ext,
-        relativePath: resolved.relativePath,
-        allowCreate: Boolean(resolved.create || allowCreate),
-        strategy,
-        via,
-      },
+      target: resolved.target,
+      info: resolved.info,
+      ext: resolved.ext,
+      relativePath: resolved.relativePath,
+      allowCreate: Boolean(resolved.create || allowCreate),
+      strategy,
+      via,
     }
   }
 
-  /**
-   * Resolve one explicit hint. Hints are source-root-relative by contract; if
-   * that path is missing and sourceRoot is a subdirectory of the workspace, a
-   * workspace-relative retry keeps repo-style hints (`data-source="demo/x.html"`)
-   * working. For stylesheet hrefs, a unique basename match elsewhere in the
-   * workspace (served assets often live in a `demo/` or `public/` subtree)
-   * resolves before any new file is created.
-   */
   const tryHintCandidate = async (relativePath, allowCreate, hintOptions = {}) => {
     const primary = await resolveSourceFile(ctx, relativePath, { allowCreate: false })
     const planned = consider(primary, 'hint', false)
@@ -238,8 +350,6 @@ export async function planEdit(ctx, edit, mapping) {
             if (plannedByName) return plannedByName
           }
         }
-        // Ambiguous basename: never invent a duplicate file next to the source.
-        if (matches.length > 1) return null
       }
     }
     if (allowCreate) {
@@ -249,21 +359,20 @@ export async function planEdit(ctx, edit, mapping) {
     return null
   }
 
-  // 1. Explicit hints first (page-declared provenance).
+  // 1. Explicit hints first (page-declared provenance). A hint only decides the
+  //    ORDER of candidates: probing still has to find the element in that file.
   if (kind === 'style' && typeof hints.styleHref === 'string' && hints.styleHref.trim()) {
     const rel = hintToRelativePath(hints.styleHref)
     if (rel) {
       const planned = await tryHintCandidate(rel, true, { basenameFallback: true })
-      if (planned) return planned
-      if (oversized) return { failed: tooLargeFailure(ctx, oversized) }
+      if (planned) push(planned)
     }
   }
   if (typeof hints.file === 'string' && hints.file.trim()) {
     const rel = hintToRelativePath(hints.file)
     if (rel) {
       const planned = await tryHintCandidate(rel, false)
-      if (planned) return planned
-      if (oversized) return { failed: tooLargeFailure(ctx, oversized) }
+      if (planned) push(planned)
     }
   }
 
@@ -271,35 +380,33 @@ export async function planEdit(ctx, edit, mapping) {
   if (mapping && mapping.eligible && mapping.relativePath) {
     const resolved = await resolveSourceFile(ctx, mapping.relativePath, { allowCreate: false })
     const planned = consider(resolved, 'url', false)
-    if (planned) return planned
-    if (oversized) return { failed: tooLargeFailure(ctx, oversized) }
+    if (planned) push(planned)
+  }
 
-    // 3. Bounded fallback search when the mapping did not resolve a usable file.
+  // 3. Bounded fallback search, lowest-priority candidate so an existing (but
+  //    element-less) mapped file cannot swallow the edit. It stays scoped to
+  //    eligible pages: a page outside the workspace (external origin, traversal
+  //    path) must never be patched through a best-effort match.
+  if (kind !== 'insert' && mapping && mapping.eligible && mapping.relativePath) {
     const found = await searchForEdit(ctx, edit, kind)
     if (found) {
       const inspected = await inspectSearchTarget(ctx, found.file.target, found.file.ext)
       if (inspected) {
-        const strategy = strategyFor(kind, inspected.ext)
-        if (strategy) {
-          return {
-            plan: {
-              target: inspected.target,
-              info: inspected.info,
-              ext: inspected.ext,
-              relativePath: inspected.relativePath,
-              allowCreate: false,
-              strategy,
-              via: 'search',
-            },
-          }
-        }
+        const planned = consider(
+          { ok: true, target: inspected.target, info: inspected.info, ext: inspected.ext, relativePath: inspected.relativePath },
+          'search',
+          false,
+        )
+        if (planned) push(planned)
       }
     }
   }
 
-  if (oversized) return { failed: tooLargeFailure(ctx, oversized) }
-  if (sawUnsupported) return { preview: { reason: 'unsupported-source-type' } }
-  return { preview: { reason: 'no-source-mapping' } }
+  if (plans.length > 0) return { plans, blocked }
+  if (oversized) return { plans: [], blocked, failed: tooLargeFailure(ctx, oversized) }
+  if (sawJs) return { plans: [], preview: { reason: 'unsupported-js-source' } }
+  if (sawUnsupported) return { plans: [], preview: { reason: 'unsupported-source-type' } }
+  return { plans: [], preview: { reason: 'no-source-mapping' } }
 }
 
 export async function processGroup(ctx, group, results, files) {
@@ -382,6 +489,7 @@ export async function processGroup(ctx, group, results, files) {
           file: fileRelative,
           strategy: 'no-op',
           line: lineAt(nextRaw, typeof appliedItem.lineIndex === 'number' ? appliedItem.lineIndex + bomOffset : undefined),
+          handle: issueHandle(current, appliedItem.item),
         }
       }
       return
@@ -415,12 +523,32 @@ export async function processGroup(ctx, group, results, files) {
         file: fileRelative,
         strategy: appliedItem.changed ? (isSearch ? 'search' : appliedItem.item.strategy) : 'no-op',
         line: lineAt(nextRaw, typeof appliedItem.lineIndex === 'number' ? appliedItem.lineIndex + bomOffset : undefined),
+        handle: issueHandle(current, appliedItem.item),
       }
       if (appliedItem.item.strategy === 'template-style' && appliedItem.changed) {
         ctx.addWarning('style rules were written into the component <style> block; scoped component styles may need :global() to match at runtime')
       }
     }
     return
+  }
+}
+
+/**
+ * Issue a stable element handle after a successful write.
+ *
+ * The handle names the element's opening tag in the NEW file bytes by
+ * offset + line + digest, so the next edit on the same element no longer has to
+ * win the heuristic ladder (which is what breaks on repeated markup). Removals
+ * have no surviving element and return null.
+ */
+function issueHandle(content, item) {
+  if (!item || !HANDLE_KINDS.has(item.edit && item.edit.kind)) return null
+  try {
+    const located = locateElementDetailed(content, item.edit)
+    if (!located.range) return null
+    return elementHandleAt(content, located.range)
+  } catch {
+    return null
   }
 }
 
@@ -440,6 +568,8 @@ export function applyEditToContent(content, item) {
       return applyMarkupRemoveEdit(content, item.edit)
     case 'html-move':
       return applyMarkupMoveEdit(content, item.edit)
+    case 'html-insert':
+      return applyMarkupInsertEdit(content, item.edit)
     default:
       return { ok: false, reason: 'unsupported-source-type' }
   }

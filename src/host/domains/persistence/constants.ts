@@ -17,6 +17,21 @@ export const TEMPLATE_EXTENSIONS = new Set(['vue', 'svelte', 'astro'])
 /** Extensions whose bytes may contain the page markup an element lives in. */
 export const MARKUP_EXTENSIONS = new Set(['html', 'htm', 'vue', 'svelte', 'astro', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'])
 
+/**
+ * Extensions a STRUCTURAL edit (remove / move / insert) may patch.
+ *
+ * Structural edits cut and re-insert whole element extents with the markup
+ * tokenizer; JavaScript/TypeScript sources are JSX, not HTML, so cutting an
+ * element there can produce syntactically invalid code (`{cond && }`,
+ * `return ( )`). Until a JS-aware patch engine exists, structure edits are
+ * limited to markup files and JS sources are reported as unsupported instead of
+ * being corrupted. Text/attribute edits keep using MARKUP_EXTENSIONS.
+ */
+export const STRUCTURE_EXTENSIONS = new Set(['html', 'htm', 'vue', 'svelte', 'astro'])
+
+/** Extensions that hold JavaScript/TypeScript (JSX) rather than HTML markup. */
+export const JS_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'])
+
 /** Extensions considered by the bounded fallback search. */
 export const SEARCH_EXTENSIONS = new Set(['html', 'htm', 'css', 'scss', 'less', 'js', 'jsx', 'ts', 'tsx', 'vue', 'svelte', 'astro'])
 

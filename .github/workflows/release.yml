@@ -1,0 +1,109 @@
+# 发布：在 GitHub 上发布 Release（或手动触发）后，自动
+#   1. 构建并跑测试；
+#   2. `npm publish` 到 npm（包名 dsh.nudge，public）；
+#   3. 重写 market/index.json（把本次版本放进 versions 最前）并提交回 main。
+#
+# 仓库根目录就是插件包根目录，所以命令都在根目录执行。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 里配置：
+#   NPM_TOKEN = npm @qizhi2design 账号的 Automation token（或 Granular token，需 publish 权限）
+# 详细步骤见 RELEASING.md。
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      skip_publish:
+        description: 只更新市场索引，不执行 npm publish（版本已手动发布时勾选）
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # 需要提交 market/index.json 回 main
+
+# 发布不能并发：两次 npm publish / 两次索引提交会互相踩。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm & update market index
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          # 发布后要提交索引回 main，所以直接检出 main 分支（而不是 detached tag）。
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          # setup-node 会写入 .npmrc，npm publish 用 NODE_AUTH_TOKEN 认证。
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build lib/
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check release tag matches package version
+        if: github.event_name == 'release'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${{ github.event.release.tag_name }}"
+          echo "package version=$version release tag=$tag"
+          if [ "$tag" != "v$version" ] && [ "$tag" != "$version" ]; then
+            echo "::error::release tag '$tag' 与 package.json 版本 'v$version' 不一致，中止发布。"
+            exit 1
+          fi
+          tag_sha="$(git rev-parse "refs/tags/${tag}^{commit}" 2>/dev/null || true)"
+          main_sha="$(git rev-parse HEAD)"
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$main_sha" ]; then
+            echo "::warning::release tag ${tag} 指向 ${tag_sha}，但 main HEAD 是 ${main_sha}；本次将发布 main 上的代码。"
+          fi
+
+      - name: Publish to npm
+        # 手动触发时可通过 skip_publish 跳过 publish，只更新市场索引。
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.skip_publish != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::缺少 NPM_TOKEN secret，请在仓库 Settings → Secrets 中配置。"
+            exit 1
+          fi
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "npm 上已存在 ${name}@${version}，跳过 publish（可安全重跑）。"
+          else
+            npm publish --access public
+          fi
+
+      - name: Update market index
+        run: node scripts/market-index.mjs --publish-timestamp="$(date +%s)"
+
+      - name: Commit & push market/index.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add market/index.json
+          if git diff --cached --quiet; then
+            echo "市场索引没有变化，跳过提交。"
+            exit 0
+          fi
+          version="$(node -p "require('./package.json').version")"
+          git commit -m "chore(market): record dsh.nudge ${version}"
+          git push origin HEAD:main

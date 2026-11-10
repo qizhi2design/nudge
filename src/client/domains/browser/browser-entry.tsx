@@ -378,7 +378,7 @@ function BrowserTabMenuAction(props) {
         whiteSpace: 'nowrap',
       },
     },
-    React.createElement(Icon.cursor, { size: 12 }),
+    React.createElement(Icon.nudge, { size: 12 }),
     React.createElement('span', null, t('browser.openInspector')),
   );
 }

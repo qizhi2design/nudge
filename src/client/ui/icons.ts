@@ -32,8 +32,12 @@ import {
 
 /**
  * The product mark: a browser window with a magnifier, drawn in `currentColor`
- * so it can sit in a tab strip or a menu row and follow the host theme. This
- * mirrors the gradient artwork in `icon.svg` without hard-coding colors.
+ * so it can sit in a tab strip or a menu row and follow the host theme.
+ *
+ * This is the canonical 24-unit geometry shared with the shipped brand artwork
+ * in `icon.svg` (which renders the same coordinates in the brand gradient).
+ * `test/brand-icon.test.mjs` asserts the two stay identical, so edit them as a
+ * pair — the 24 viewBox also matches the Lucide icon box and stroke weight.
  */
 export function NudgeMark({
   size = 16,
@@ -49,43 +53,39 @@ export function NudgeMark({
     {
       width: size,
       height: size,
-      viewBox: '0 0 16 16',
+      viewBox: '0 0 24 24',
       fill: 'none',
+      stroke: 'currentColor',
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
       'aria-hidden': 'true',
       focusable: 'false',
       className,
       style,
     },
     React.createElement('rect', {
-      x: 1.2,
-      y: 2,
-      width: 11.2,
-      height: 9.2,
+      x: 2.5,
+      y: 3,
+      width: 12,
+      height: 9,
       rx: 2.3,
-      stroke: 'currentColor',
-      strokeWidth: 1.2,
+      strokeWidth: 1.8,
       opacity: 0.9,
     }),
     React.createElement('path', {
-      d: 'M4 5.1h3.6M4 7.2h2.4',
-      stroke: 'currentColor',
-      strokeWidth: 1.1,
-      strokeLinecap: 'round',
-      opacity: 0.55,
+      d: 'M6 6.4h3.2M6 8.4h2',
+      strokeWidth: 1.6,
+      opacity: 0.5,
     }),
     React.createElement('circle', {
-      cx: 11.4,
-      cy: 10.6,
-      r: 2.7,
-      fill: 'none',
-      stroke: 'currentColor',
-      strokeWidth: 1.35,
+      cx: 16.2,
+      cy: 16,
+      r: 3.5,
+      strokeWidth: 2,
     }),
     React.createElement('path', {
-      d: 'M13.35 12.55 14.75 13.95',
-      stroke: 'currentColor',
-      strokeWidth: 1.6,
-      strokeLinecap: 'round',
+      d: 'M18.8 18.6 21 20.8',
+      strokeWidth: 2.2,
     }),
   )
 }

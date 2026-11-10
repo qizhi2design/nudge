@@ -206,7 +206,13 @@ const api = state.provided && state.provided.service
 assert(api !== null && typeof api === 'object', 'apply provides the nudge service')
 assert(state.provided.name === 'nudge', 'service namespace is nudge')
 assert(state.typert && Array.isArray(state.typert.invocations), 'typert contribution registered')
-assert(state.typert.invocations.length === 16, 'sixteen remote invocations registered')
+assert(state.typert.invocations.length === 17, 'seventeen remote invocations registered')
+
+const pong = await api.ping()
+assert(
+  pong && pong.ok === true && Array.isArray(pong.capabilities) && pong.capabilities.indexOf('insert') !== -1 && pong.capabilities.indexOf('handle') !== -1,
+  'ping advertises Host capabilities so the Client can detect a stale Host half',
+)
 
 const facts = await api.session('session-1')
 assert(facts.cwd === workspace, 'session endpoint resolves the workspace cwd')
@@ -309,6 +315,55 @@ assert(checked.update.latest === '9.9.9', 'about reports the newest published ve
 delete state.extra.pluginManager
 const unavailable = await api.about(true)
 assert(unavailable.update.status === 'unavailable', 'about reports the update check as unavailable without a plugin manager')
+
+// 0c. One-click update: only the plugin manager is asked; failures stay data.
+const noManager = await api.update('9.9.9')
+assert(noManager.status === 'failed', 'update without a plugin manager fails instead of throwing')
+assert(typeof noManager.message === 'string' && noManager.message.length > 0, 'update failure keeps a readable message')
+state.extra.pluginManager = {
+  async listVersions() {
+    return { status: 'listed', installed: about.version, registry: 'npm', versions: [{ version: '9.9.9' }], attempts: [] }
+  },
+  async updateBundle(packageName, version, options) {
+    assert(packageName === 'dsh.nudge', 'updateBundle receives the plugin package name')
+    assert(typeof options?.requestId === 'string' && options.requestId.length > 0, 'updateBundle receives a request id')
+    return {
+      from: about.version,
+      to: version,
+      step: 'install',
+      result: { changed: true, application: 'restart-required', stage: 'install', target: packageName },
+    }
+  },
+}
+const updated = await api.update('9.9.9')
+assert(updated.status === 'restart-required', 'update reports a restart-required success')
+assert(updated.to === '9.9.9' && updated.restart === true, 'update reports the installed version and restart flag')
+const afterUpdate = await api.about(false)
+assert(afterUpdate.update.status === 'current', 'about reads the post-update current snapshot')
+state.extra.pluginManager.updateBundle = async () => ({
+  from: '9.9.9',
+  to: '9.9.10',
+  step: 'check',
+  result: {
+    changed: false,
+    application: 'failed',
+    stage: 'install',
+    target: 'dsh.nudge',
+    error: { code: 'invalid-spec', diagnostic: 'dsh.nudge@9.9.10 declares no dsh.bundle' },
+  },
+})
+const refused = await api.update('9.9.10')
+assert(refused.status === 'failed', 'a refused update is reported as failed data')
+assert(refused.message.includes('declares no dsh.bundle'), 'a refused update keeps the manager diagnostic', refused.message)
+state.extra.pluginManager.updateBundle = async () => ({
+  from: '9.9.9',
+  to: '9.9.11',
+  step: 'install',
+  result: { changed: true, application: 'applied', stage: 'install', target: 'dsh.nudge' },
+})
+const applied = await api.update('9.9.11')
+assert(applied.status === 'updated', 'an HMR-applied update reports updated')
+assert(applied.restart === false, 'an HMR-applied update does not ask for a restart')
 
 // 1. Style edit on a static element with an explicit data-source hint.
 const styleEdit = {

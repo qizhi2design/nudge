@@ -114,6 +114,8 @@ function NudgeWorkspacePanel(props) {
   var sessionId = props.sessionId || '';
   var refreshToken = typeof props.refreshToken === 'number' ? props.refreshToken : 0;
   var h = React.createElement;
+  // Embedded: the dock owns width, border, header, close and refresh.
+  var embedded = props.embedded === true;
 
   var remoteRef = React.useRef(null);
   if (remoteRef.current === null) remoteRef.current = createRemote(props.ctx);
@@ -238,6 +240,25 @@ function NudgeWorkspacePanel(props) {
   var activeFile = explicitExists ? explicitFile : inferredFile && inferredFile.path ? inferredFile.path : '';
   var git = workspaceGit(snapshot);
   var writable = workspaceWritable(snapshot);
+
+  // The dock header renders the refresh button; hand it the panel's action.
+  React.useEffect(function () {
+    var handle = props.refreshHandle;
+    if (!handle) return undefined;
+    handle.current = refresh;
+    return function () {
+      if (handle.current === refresh) handle.current = null;
+    };
+  });
+
+  // Without a repository only the file list remains; never leave a hidden
+  // versions/commit tab active after the repo state changes.
+  React.useEffect(
+    function () {
+      if (git && git.available !== true && activeTab !== 'files') setActiveTab('files');
+    },
+    [git, activeTab],
+  );
   var changes = commitCandidates(snapshot);
   var selectedPaths = selectionRef.current.paths;
 
@@ -540,12 +561,9 @@ function NudgeWorkspacePanel(props) {
       return h('div', { style: workspacePanelMutedStyle(theme, { padding: '8px 10px' }) }, t('workspace.noSession'));
     }
     if (!git || git.available !== true) {
-      var reason = git && git.error ? String(git.error) : '';
-      return h(
-        'div',
-        { style: workspacePanelMutedStyle(theme, { padding: '8px 10px' }) },
-        t('workspace.gitUnavailable', { reason: reason === '' ? t('workspace.gitNotRepo') : reason }),
-      );
+      // The no-repo explanation moves inside the files list so the panel does
+      // not spend a permanent row on it (see renderFilesTab).
+      return null;
     }
     return h(
       'div',
@@ -590,6 +608,10 @@ function NudgeWorkspacePanel(props) {
   }
 
   function renderTabs() {
+    var tabs = WORKSPACE_PANEL_TABS.filter(function (tab) {
+      return tab.id === 'files' || (git && git.available === true);
+    });
+    if (tabs.length <= 1) return null;
     return h(
       'div',
       {
@@ -603,7 +625,7 @@ function NudgeWorkspacePanel(props) {
           borderBottom: '1px solid ' + (theme.borderStrong || theme.border),
         },
       },
-      WORKSPACE_PANEL_TABS.map(function (tab) {
+      tabs.map(function (tab) {
         var active = activeTab === tab.id;
         return h(
           'button',
@@ -666,7 +688,10 @@ function NudgeWorkspacePanel(props) {
       dir !== ''
         ? h(
             'span',
-            { style: { flex: 'none', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: theme.faint || theme.muted, fontSize: 10.5 } },
+            {
+              'data-workspace-file-dir': '',
+              style: { flex: 'none', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: theme.faint || theme.muted, fontSize: 10.5 },
+            },
             dir,
           )
         : null,
@@ -694,6 +719,19 @@ function NudgeWorkspacePanel(props) {
   function renderFilesTab() {
     var visible = filterWorkspaceFiles(files, filter);
     var rows = [];
+    if (git && git.available !== true) {
+      var gitReason = git.error ? String(git.error) : '';
+      rows.push(
+        h(
+          'div',
+          {
+            key: 'git-hint',
+            style: workspacePanelMutedStyle(theme, { padding: '8px 10px 2px', fontSize: 10.5, lineHeight: 1.45 }),
+          },
+          t('workspace.gitUnavailable', { reason: gitReason === '' ? t('workspace.gitNotRepo') : gitReason }),
+        ),
+      );
+    }
     rows.push(
       h('div', { key: 'filter', style: { padding: '8px 8px 4px' } }, h('input', {
         type: 'search',
@@ -1124,18 +1162,18 @@ function NudgeWorkspacePanel(props) {
       'data-dsh-nudge-workspace-panel': '',
       'aria-label': t('workspace.title'),
       style: {
-        width: 300,
-        flex: 'none',
-        minWidth: 300,
+        width: embedded ? '100%' : 300,
+        flex: embedded ? '1 1 auto' : 'none',
+        minWidth: embedded ? 0 : 300,
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        borderLeft: '1px solid ' + (theme.borderStrong || theme.border),
+        borderLeft: embedded ? 'none' : '1px solid ' + (theme.borderStrong || theme.border),
         background: theme.base,
         color: theme.text,
       },
     },
-    renderHeader(),
+    embedded ? null : renderHeader(),
     renderRepoSummary(),
     renderTabs(),
     error !== ''

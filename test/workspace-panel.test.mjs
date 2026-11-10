@@ -418,6 +418,23 @@ async function clickAndSettle(props, predicate, until) {
     'demo/index.html',
   )
   eq('infer active file is null for unknown URLs', helpers.inferActiveFile(fixture(), 'http://127.0.0.1:43127/other.html'), null)
+  eq(
+    'first workspace HTML prefers the index.html entry point',
+    helpers.firstWorkspaceHtmlFile(fixture()).path,
+    'demo/index.html',
+  )
+  eq(
+    'first workspace HTML prefers a root index over a nested one',
+    helpers.firstWorkspaceHtmlFile({ htmlFiles: [{ path: 'pages/index.html' }, { path: 'index.htm' }] }).path,
+    'index.htm',
+  )
+  eq(
+    'first workspace HTML falls back to shallowest path order',
+    helpers.firstWorkspaceHtmlFile({ htmlFiles: [{ path: 'z/page.html' }, { path: 'b.html' }, { path: 'a.html' }] }).path,
+    'a.html',
+  )
+  eq('first workspace HTML skips empty paths', helpers.firstWorkspaceHtmlFile({ htmlFiles: [{ path: '' }, { path: 'z.html' }] }).path, 'z.html')
+  eq('first workspace HTML is null without files', helpers.firstWorkspaceHtmlFile({ htmlFiles: [] }), null)
   deepEq('watch changed paths are bounded to the last entries', helpers.watchChangedPaths({
     changed: [{ path: 'a' }, { path: 'b' }, { path: '' }],
   }), ['a', 'b'])
@@ -721,6 +738,31 @@ async function clickAndSettle(props, predicate, until) {
   assert(textOf(restored.tree) !== '', 'panel re-renders after a restore')
 }
 
+// ------------------------------------------------------- embedded dock mode
+
+{
+  console.log('\n# embedded panel hands its header, close and refresh to the dock')
+  runtime.reset()
+  const embeddedRemote = createRemote((endpoint) => {
+    if (endpoint === 'workspace') return fixture()
+    if (endpoint === 'gitLog') return { file: '', commits: [] }
+    return { __error: 'unexpected endpoint: ' + endpoint }
+  })
+  const view = await settle(panelProps(hostOf(embeddedRemote), { embedded: true }), (tree) => textOf(tree).includes('index.html'))
+  const root = findNode(view.tree, (node) => node.props['data-dsh-nudge-workspace-panel'] !== undefined)
+  assert(root !== undefined, 'embedded workspace keeps its panel contract')
+  eq('embedded workspace fills the dock width', root.props.style.width, '100%')
+  eq('embedded workspace drops its own border', root.props.style.borderLeft, 'none')
+  assert(
+    findNode(view.tree, (node) => node.props['aria-label'] === 'workspace.close') === undefined,
+    'embedded workspace hides its own close button',
+  )
+  assert(
+    findNode(view.tree, (node) => node.props['aria-label'] === 'workspace.refresh') === undefined,
+    'embedded workspace hides its own refresh button (the dock header owns it)',
+  )
+}
+
 // ------------------------------------------------------------- no repo state
 
 {
@@ -749,6 +791,14 @@ async function clickAndSettle(props, predicate, until) {
   assert(textOf(view.tree).includes('workspace.gitUnavailable'), 'no-repository state is explained')
   assert(textOf(view.tree).includes('not-a-repository'), 'the stable git reason is surfaced')
   assert(callsTo(remote, 'gitLog').length === 0, 'no repository means no log request')
+  assert(
+    findNode(view.tree, (node) => node.props['data-workspace-tab'] === 'versions') === undefined,
+    'the versions tab is hidden without a repository',
+  )
+  assert(
+    findNode(view.tree, (node) => node.props['data-workspace-tab'] === 'files') === undefined,
+    'a single remaining tab drops the whole secondary tab strip',
+  )
 }
 
 // ------------------------------------------------------------- failures

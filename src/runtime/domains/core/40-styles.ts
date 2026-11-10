@@ -113,7 +113,7 @@
 		var node = firstDirectTextNode(element)
 		return node ? String(node.nodeValue || '').trim() : ''
 	}
-	function visibleTextOf(element) {
+	function visibleTextOf(element, limit) {
 		var text = ''
 		try {
 			text = element.innerText
@@ -135,7 +135,9 @@
 					text = ''
 				}
 		}
-		return (text.length > 300 && (text = text.slice(0, 300)), text)
+		var max = Number(limit)
+		if (!isFinite(max) || max <= 0) max = 300
+		return (text.length > max && (text = text.slice(0, max)), text)
 	}
 	function rectOf(element) {
 		var rect = null

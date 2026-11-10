@@ -90,7 +90,7 @@ export interface InspectorToolbarProps {
   }
 }
 
-const INITIAL_LAYOUT: ToolbarLayout = { compact: false, tiny: false }
+const INITIAL_LAYOUT: ToolbarLayout = { compact: false, tiny: false, panelLabels: true }
 
 function hoverBackground(theme: InspectorTheme) {
   return 'var(--dsw-alias-interactive-bg-hover, ' + (theme.hover || theme.layer2) + ')'
@@ -230,46 +230,204 @@ function ReloadAction({
   )
 }
 
-/** Auto-reload toggle with the same pending affordance in the action row. */
-function HotReloadAction({
+function colorMix(color: string, percent: number) {
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`
+}
+
+export interface HotReloadVisual {
+  /** Selected pill surface, border and ink for the current state. */
+  background: string
+  border: string
+  color: string
+}
+
+/**
+ * Pure selected / unselected / pending palette for the auto-reload toggle.
+ * Exported so the engineering test can assert that each state is visually
+ * distinct rather than only asserting markup.
+ */
+export function hotReloadVisual(theme: InspectorTheme, active: boolean, pending: boolean): HotReloadVisual {
+  const accent = theme.accent || theme.brand
+  const warn = theme.warn || theme.brand
+  if (pending) {
+    return {
+      background: colorMix(warn, 16),
+      border: colorMix(warn, 40),
+      color: warn,
+    }
+  }
+  if (active) {
+    return {
+      background: colorMix(accent, 12),
+      border: colorMix(accent, 36),
+      color: accent,
+    }
+  }
+  return {
+    background: 'transparent',
+    border: toolBorder(theme),
+    color: theme.muted,
+  }
+}
+
+/**
+ * Auto-reload is a selected/unselected toggle like 标注 / 编辑, not an icon that
+ * happens to toggle: a labeled pill carries the state, and a click flashes
+ * 「已开启 / 已关闭」 so both directions give feedback. The selected tint keeps
+ * showing when the toolbar collapses to icons; only the label is dropped.
+ */
+function HotReloadToggle({
   theme,
   title,
+  label,
+  onText,
+  offText,
+  pendingText,
   active,
   pending,
+  compact,
   shortcut,
   shortcutPlatform,
   onClick,
 }: {
   theme: InspectorTheme
   title: string
+  label: string
+  onText: string
+  offText: string
+  pendingText: string
   active: boolean
   pending: boolean
+  compact: boolean
   shortcut?: ShortcutBinding | null
   shortcutPlatform?: ShortcutPlatform
   onClick: () => void
 }) {
-  const accent = pending ? (theme.warn || theme.brand) : theme.brand
-  const state = useHover()
+  const visual = hotReloadVisual(theme, active, pending)
+  const [hover, setHover] = React.useState(false)
+  const [pressed, setPressed] = React.useState(false)
+  const [focused, setFocused] = React.useState(false)
+  const [flash, setFlash] = React.useState<'on' | 'off' | null>(null)
+
+  React.useEffect(() => {
+    if (flash === null) return undefined
+    const timer = window.setTimeout(() => setFlash(null), 1400)
+    return () => window.clearTimeout(timer)
+  }, [flash])
+
+  const accent = pending ? theme.warn || theme.brand : theme.accent || theme.brand
+  const surface = hover && !pressed ? colorMix(accent, pending ? 20 : active ? 18 : 8) : visual.background
+  const border = hover || focused ? colorMix(accent, pending ? 46 : active ? 44 : 26) : visual.border
+  const text = flash === 'on' ? onText : flash === 'off' ? offText : pending ? pendingText : label
+  // Reserve the label's resting width so the transient 「已开启 / 已关闭」 text
+  // never shifts the rest of the toolbar; measure per locale instead of
+  // hard-coding a CJK width (English labels are longer).
+  const labelWidth = Math.max(46, label.length * 7)
+
   return (
     <Tooltip label={title} shortcut={shortcut} platform={shortcutPlatform}>
       <Button
         aria-label={title}
         aria-pressed={active}
+        data-hot-reload-toggle=""
+        data-hot-reload-state={active ? 'on' : 'off'}
         data-hot-reload-pending={pending ? 'true' : undefined}
-        onClick={onClick}
+        data-hot-reload-flash={flash === null ? undefined : flash}
+        className={pending ? 'dshnudge-hot-reload-pending' : undefined}
+        onClick={() => {
+          setFlash(active ? 'off' : 'on')
+          onClick()
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => {
+          setHover(false)
+          setPressed(false)
+        }}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         variant="ghost"
-        {...state.bind}
+        size="sm"
         style={{
-          color: pending ? (theme.warn || theme.brand) : active ? theme.text : theme.muted,
-          background: pending
-            ? `color-mix(in srgb, ${accent} 16%, transparent)`
-            : state.hover
-              ? hoverBackground(theme)
-              : 'transparent',
-          borderColor: pending ? `color-mix(in srgb, ${accent} 34%, transparent)` : 'transparent',
+          color: visual.color,
+          background: surface,
+          borderColor: border,
+          padding: compact ? '0 6px' : '0 8px',
+          gap: compact ? 4 : 6,
+          transform: pressed ? 'scale(0.97)' : 'none',
+          boxShadow: focused ? `0 0 0 2px ${colorMix(accent, 30)}` : 'none',
+          transition:
+            'background-color 150ms cubic-bezier(.23,1,.32,1), border-color 150ms cubic-bezier(.23,1,.32,1), color 150ms cubic-bezier(.23,1,.32,1), box-shadow 150ms cubic-bezier(.23,1,.32,1), transform 120ms cubic-bezier(.23,1,.32,1)',
         }}
       >
-        <RefreshCw size={14} />
+        <RefreshCw size={13} />
+        {compact ? null : (
+          <span
+            aria-live="polite"
+            style={{
+              display: 'inline-block',
+              minWidth: labelWidth,
+              fontSize: 11.5,
+              fontWeight: 600,
+              lineHeight: 1,
+              textAlign: 'center',
+              color: visual.color,
+            }}
+          >
+            {text}
+          </span>
+        )}
+      </Button>
+    </Tooltip>
+  )
+}
+
+/** DOM / workspace entries: icon-only on narrow panes, icon + label when roomy. */
+function PanelToggle({
+  active,
+  label,
+  title,
+  theme,
+  icon,
+  showLabel,
+  shortcut,
+  shortcutPlatform,
+  onClick,
+}: {
+  active?: boolean
+  label: string
+  title: string
+  theme: InspectorTheme
+  icon: React.ReactNode
+  showLabel: boolean
+  shortcut?: ShortcutBinding | null
+  shortcutPlatform?: ShortcutPlatform
+  onClick: () => void
+}) {
+  const state = useHover()
+  return (
+    <Tooltip label={title} shortcut={shortcut} platform={shortcutPlatform}>
+      <Button
+        aria-label={label}
+        aria-pressed={active}
+        onClick={onClick}
+        variant={active ? 'active' : 'ghost'}
+        {...state.bind}
+        style={{
+          color: active ? theme.text : theme.muted,
+          background: active ? (theme.hover || theme.layer2) : state.hover ? hoverBackground(theme) : 'transparent',
+          borderColor: active ? toolBorder(theme) : 'transparent',
+          // Button's icon size class (dshnudge-w-7) is a CSS class, so a labeled
+          // button must override it with an explicit width instead of undefined.
+          width: showLabel ? 'auto' : 28,
+          padding: showLabel ? '0 8px' : 0,
+        }}
+      >
+        {icon}
+        {showLabel ? (
+          <span style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1 }}>{label}</span>
+        ) : null}
       </Button>
     </Tooltip>
   )
@@ -362,9 +520,8 @@ export function InspectorToolbar({
   const addressRef = React.useRef<HTMLInputElement>(null)
   const shownUrl = draft !== null ? draft : tab.url || ''
   const hotReloadOn = hotReload !== false
-  const hotReloadTitle =
-    reloadPending === true ? t('hotReload.titlePending') : hotReloadOn ? t('hotReload.titleOn') : t('hotReload.titleOff')
-  const pending = reloadPending === true
+  const pending = reloadPending === true && hotReloadOn
+  const hotReloadTitle = pending ? t('hotReload.titlePending') : hotReloadOn ? t('hotReload.titleOn') : t('hotReload.titleOff')
   const annotateEnabled = enabled.annotate !== false
   const editEnabled = enabled.edit !== false
   const domEnabled = enabled.domTree !== false
@@ -391,7 +548,11 @@ export function InspectorToolbar({
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? node.clientWidth
       const next = toolbarLayout(width)
-      setLayout((previous) => (previous.compact === next.compact && previous.tiny === next.tiny ? previous : next))
+      setLayout((previous) =>
+        previous.compact === next.compact && previous.tiny === next.tiny && previous.panelLabels === next.panelLabels
+          ? previous
+          : next,
+      )
     })
     observer.observe(node)
     return () => observer.disconnect()
@@ -453,35 +614,42 @@ export function InspectorToolbar({
       ) : null}
       {modesEnabled && panelsEnabled ? <Divider theme={theme} /> : null}
       {domEnabled ? (
-        <IconAction
+        <PanelToggle
           theme={theme}
           label={t('toolbar.dom')}
+          title={t('toolbar.dom')}
           active={domOpen === true}
+          showLabel={layout.panelLabels}
           shortcut={shortcutFor('nudge.dom.toggle')}
           shortcutPlatform={shortcutPlatform}
           onClick={() => onToggleDom && onToggleDom()}
-        >
-          <ListTree size={14} />
-        </IconAction>
+          icon={<ListTree size={14} />}
+        />
       ) : null}
       {workspaceEnabled ? (
-        <IconAction
+        <PanelToggle
           theme={theme}
           label={t('workspace.open')}
+          title={t('workspace.open')}
           active={workspaceOpen === true}
+          showLabel={layout.panelLabels}
           shortcut={shortcutFor('nudge.workspace.toggle')}
           shortcutPlatform={shortcutPlatform}
           onClick={() => onToggleWorkspace && onToggleWorkspace()}
-        >
-          <GitBranch size={14} />
-        </IconAction>
+          icon={<GitBranch size={14} />}
+        />
       ) : null}
       {hotReloadEnabled ? (
-        <HotReloadAction
+        <HotReloadToggle
           theme={theme}
           title={hotReloadTitle}
+          label={t('hotReload.label')}
+          onText={t('hotReload.on')}
+          offText={t('hotReload.off')}
+          pendingText={t('hotReload.pendingShort')}
           active={hotReloadOn}
           pending={pending}
+          compact={layout.compact}
           onClick={() => onToggleHotReload && onToggleHotReload()}
         />
       ) : null}

@@ -153,6 +153,67 @@
 		}
 		return { ok: !0, before: null, after: null, applied: !0, moved: !0 }
 	}
+	/** Reverse lookup of `keyForElement`; detached entries are dropped lazily. */
+	function elementByKey(key) {
+		if (key == null || key === '') return null
+		var text = String(key),
+			element = STRUCTURE_KEY_BY_KEY.get(text) || null
+		if (element && element.nodeType === 1 && isConnected(element) && !isOwnNode(element)) return element
+		if (element) STRUCTURE_KEY_BY_KEY.delete(text)
+		return null
+	}
+	/** Build one element from an HTML string via an inert `<template>` parse. */
+	function elementFromHTML(html) {
+		var source = String(html == null ? '' : html)
+		if (source.trim() === '') return { ok: !1, reason: 'invalid-html', inserted: null }
+		var template = null
+		try {
+			template = doc.createElement('template')
+		} catch {
+			template = null
+		}
+		if (!template || !template.content) return { ok: !1, reason: 'unsupported-document', inserted: null }
+		try {
+			template.innerHTML = source
+		} catch {
+			return { ok: !1, reason: 'invalid-html', inserted: null }
+		}
+		for (var nodes = template.content.childNodes || [], index = 0; index < nodes.length; index += 1) {
+			var node = nodes[index]
+			if (node && node.nodeType === 1) return { ok: !0, inserted: node }
+		}
+		return { ok: !1, reason: 'invalid-html', inserted: null }
+	}
+	/** Insert HTML before an anchor (or append) inside an allowed parent. */
+	function applyInsertTo(parent, before, html) {
+		if (!parent || parent.nodeType !== 1) return { ok: !1, reason: 'not-found', inserted: null }
+		if (isOwnNode(parent)) return { ok: !1, reason: 'protected-element', inserted: null }
+		var parentTag = tagLower(parent)
+		if (parentTag === 'html' || parentTag === 'head') return { ok: !1, reason: 'protected-element', inserted: null }
+		if (STRUCTURE_NO_CHILDREN[parentTag]) return { ok: !1, reason: 'unsupported-target-parent', inserted: null }
+		var parsed = elementFromHTML(html)
+		if (!parsed.ok) return { ok: !1, reason: parsed.reason, inserted: null }
+		var inserted = parsed.inserted,
+			insertedTag = tagLower(inserted)
+		if (insertedTag === 'html' || insertedTag === 'head' || insertedTag === 'body') return { ok: !1, reason: 'protected-element', inserted: null }
+		if (isOwnNode(inserted)) return { ok: !1, reason: 'protected-element', inserted: null }
+		var anchor = before && before.parentNode === parent ? before : null
+		try {
+			parent.insertBefore(inserted, anchor)
+		} catch {
+			return { ok: !1, reason: 'write-failed', inserted: null }
+		}
+		return { ok: !0, inserted: inserted }
+	}
+	/** Move a previously anchored element resolved by its runtime key. */
+	function applyMoveByKey(key, parent, before) {
+		var element = elementByKey(key)
+		if (!element) return { ok: !1, reason: 'not-found', moved: null }
+		if (parent && isOwnNode(parent)) return { ok: !1, reason: 'protected-element', moved: null }
+		if (before && isOwnNode(before)) return { ok: !1, reason: 'protected-element', moved: null }
+		var outcome = applyMoveTo(element, parent, before || null)
+		return outcome && outcome.ok ? { ok: !0, moved: element } : { ok: !1, reason: (outcome && outcome.reason) || 'write-failed', moved: null }
+	}
 	function reapply(edits) {
 		for (var list = Array.isArray(edits) ? edits : [], applied = 0, failed = 0, results = [], index = 0; index < list.length; index += 1) {
 			var edit = list[index] || {},

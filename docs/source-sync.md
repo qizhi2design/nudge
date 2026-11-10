@@ -40,7 +40,11 @@ from the facade entry, so `lib/index.js` keeps importing `./source-sync.js`.
 
 ## Strategy order (per edit)
 
-1. **Explicit hints first** (`EditRecord.sourceHints`)
+1. **Candidate list, not a single route.** Every edit collects ordered
+   candidates (hint -> URL mapping -> search) and is written into the first one
+   whose file actually contains the element. A hint or a URL-mapped file that
+   resolves but cannot locate the element no longer terminates the edit.
+2. **Explicit hints first** (`EditRecord.sourceHints`)
    - `styleHref` (style edits): resolved against `sourceRoot`; when that path is
      missing, a unique basename match elsewhere in the workspace is used (pages
      served from `demo/`/`public/` can hint `/app.css` while the source lives at
@@ -49,21 +53,21 @@ from the facade entry, so `lib/index.js` keeps importing `./source-sync.js`.
    - `file`: workspace-relative or URL path, resolved against `sourceRoot`; if
      that is missing and `sourceRoot` is a workspace subdirectory, one
      workspace-relative retry keeps repo-style `data-source` hints working.
-2. **Page URL mapping**
+3. **Page URL mapping**
    - Only HTTP(S) pages are eligible: the origin must equal the configured
      `urlRoot` origin, or be loopback (`127.0.0.1`, `localhost`, `[::1]`) when
      `urlRoot` is empty. Non-eligible pages stay `preview` (`no-source-mapping`).
    - The URL path is decoded once, rejects NUL / `..` / absolute escapes, and
      must stay inside `sourceRoot` (`fs.resolve` + `fs.contains`). A directory
      mapping falls back to `index.html`.
-3. **Bounded fallback search** under `sourceRoot`
+4. **Bounded fallback search** under `sourceRoot` (eligible pages only, lowest priority)
    - Skips `node_modules`, `.git`, `dist`, `.dsh`, hidden directories, unknown
      extensions and files over the read limit; walks up to `maxScanFiles`
      candidates in deterministic name order.
    - Scores each candidate by selector id/class tokens (`id="x"`, class token,
      `#x` / `.x` in stylesheets) plus the edit's `textSnippet`.
    - Unique best score above a threshold wins; result reports `strategy:'search'`.
-4. Nothing resolved → `preview` with `reason:'no-source-mapping'` (or
+5. Nothing resolved → `preview` with `reason:'no-source-mapping'` (or
    `unsupported-source-type` when a file was found but cannot be patched
    textually, e.g. a style edit mapped to a `.js` file).
 
@@ -76,6 +80,9 @@ from the facade entry, so `lib/index.js` keeps importing `./source-sync.js`.
 | `.vue`/`.svelte`/`.astro` | style | `template-style` | first `<style>` block (or a new one appended); warning emitted because scoped styles may need `:global()` |
 | markup files (incl. JSX/TSX) | text | `html-text` | locate element by id → unique normalized `outerHTML` → exact `textBefore` in a token-matched tag; replace only the changed span inside its own text node so child tags survive |
 | markup files | attr | `html-attr` | replace/insert (or remove when `attrAfter: null`) one attribute in the opening tag; refuses `on*`, `style`, `srcDoc`, and script/data URLs |
+| markup files | remove | `html-remove` | locate the element, cut its whole extent (`openStart..closeEnd`); a whole-line removal drops the emptied line, an inline removal keeps one separating space; refuses `html`/`head`/`body` |
+| markup files | move | `html-move` | cut the source extent, re-indent and insert before `beforeSelector` (or append into `targetParentSelector` when null); a destination/anchor may also be addressed by `targetParentPath` / `beforePath`; both endpoints must resolve uniquely inside the same file; refuses protected tags, unsupported parents, and a destination inside the moved subtree |
+| markup files | insert | `html-insert` | write a captured `html` snippet back (inverse of `remove`) before `beforeSelector`, or append into `targetParentSelector`; re-indents the snippet to the destination line |
 | any | — | `no-op` | computed content already equals the file; reports `synced` without writing |
 
 CSS declarations are updated with a balanced-brace/quote-aware scanner, never a
@@ -108,9 +115,19 @@ entities without cutting an entity span.
 
 ## Reason labels
 
-`preview`: `no-source-mapping`, `unresolved-element`, `unsupported-source-type`,
-`unsupported-attribute`, `unsafe-attribute`, `ambiguous-selector`,
-`invalid-edit`, `unsupported-edit-kind`, `read-only-policy`, `file-missing`.
+`preview`: `no-source-mapping`, `unresolved-element`, `ambiguous-element`,
+`path-mismatch`, `protected-element`, `unsupported-target-parent`,
+`unresolved-target-parent`, `unresolved-target-anchor`, `invalid-move-target`,
+`unsupported-js-source`, `unsupported-source-type`, `unsupported-attribute`,
+`unsafe-attribute`, `ambiguous-selector`, `invalid-edit`,
+`unsupported-edit-kind`, `read-only-policy`, `file-missing`.
+
+The structure-specific labels (`protected-element`,
+`unsupported-target-parent`, `unresolved-target-parent`,
+`unresolved-target-anchor`, `invalid-move-target`, `unsupported-js-source`) are
+only reachable for `kind: 'remove' | 'move' | 'insert'`. Preview results may also
+carry `candidates: [{ file, why }]` — every file that was probed, with the reason
+it failed — so the UI can offer a "write to this file instead" path.
 
 `failed`: `file-too-large`, `read-failed`, `write-failed`, `stale-version`,
 `internal-error`, `fs-unavailable`, `workspace-unavailable`.
@@ -130,14 +147,35 @@ entities without cutting an entity span.
 - **Dynamic content** rendered by JavaScript, virtual-DOM text nodes, and
   components whose markup comes from a server template (PHP/ERB/Handlebars) are
   preview-only or land in a template file only when the mapping is unambiguous.
-- **Element `path` fallback** from the edit record is accepted by the contract
-  but not used for location; the id/outerHTML/textBefore heuristics cover it.
+- **Element `path`** from the edit record is a **last-resort locator** used only
+  by `locateByPath` (native `id` / `outerHTML` / `textBefore` are tried first);
+  it only matches when the source element tree mirrors the live DOM, and it is
+  weakened for a truncated `outerHTML`. See `docs/dom-structure-sync.md` §4.3.
 - **Style resets** (`value: ''`, the panel's reset button) stay `preview`
   (`invalid-edit`): the source of the pre-edit value is unknown, so removing a
   declaration could destroy authored CSS. Re-enter an explicit value to persist.
 - **Text edits with an ambiguous changed span** (e.g. the same words appearing
   several times in the element) deliberately stay `preview`
   (`unresolved-element`) instead of guessing.
+- **Structural kinds only patch markup files.** `remove` / `move` / `insert`
+  accept `html`/`htm`/`vue`/`svelte`/`astro`; JS sources (`js`/`jsx`/`ts`/`tsx`/
+  `mjs`/`cjs`) are refused with `unsupported-js-source` because cutting an
+  element out of JSX with an HTML tokenizer produced invalid code. Text/attribute
+  edits still accept those extensions.
+- **Element handles.** A successful `text`/`attr`/`move`/`insert` result carries
+  `handle: { openStart, line, tag, openTagDigest }`. A later edit that carries it
+  back is located by that handle first, which makes repeated edits on repeated
+  markup deterministic. A stale handle simply falls through to the normal
+  locator.
+- **Structure edits (`remove` / `move`)** are located with a narrower anchor set
+  than text/attr: the runtime sends `textSnippet`, but this module's locator
+  reads only `textBefore`, so the text step is skipped. A `data-source` hint is
+  trusted as the file route and a locate miss inside that file does **not**
+  retry URL mapping or the bounded search, so a JS-rendered node (or a page
+  whose markup lives in a component while the URL maps to a shell) stays
+  `preview`. `.js`/`.jsx`/`.ts`/`.tsx` are accepted for structure edits although
+  the cut is not JS/JSX-aware. Full diagnosis, reproduction and the planned fix
+  are in `docs/dom-structure-sync.md`.
 - **Generated/hashed selectors** and shared comma-selector rules are not
   rewritten in place (a new rule with the full selector is appended), and the
   fallback search is heuristic: a sync can target the best-scoring candidate

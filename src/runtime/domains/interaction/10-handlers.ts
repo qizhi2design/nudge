@@ -75,8 +75,12 @@
 		var overOverlay = isOverlayEvent(event)
 		if (!passthrough && !popover && !overOverlay) syncPointerCursor()
 		else hidePart(parts && parts.cursor)
-		if (overOverlay) hidePart(parts && parts.meta)
-		else if (hoverEl && !passthrough && !popover && mode !== 'browse') updateMeta()
+		if (overOverlay) {
+			// The pointer is on our own panel: it keeps the native cursor and must
+			// not keep the page hover chrome around the previously hovered element.
+			hidePart(parts && parts.meta)
+			scheduleFrame()
+		} else if (hoverEl && !passthrough && !popover && mode !== 'browse') updateMeta()
 		if (mode === 'browse' || passthrough) {
 			if (passthrough && hoverEl) {
 				hoverEl = null

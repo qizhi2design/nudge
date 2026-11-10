@@ -114,6 +114,39 @@ function workspaceFiles(workspace) {
   return workspace && Array.isArray(workspace.htmlFiles) ? workspace.htmlFiles : [];
 }
 
+/**
+ * The page a freshly opened workspace should start on: an `index.html` entry
+ * point wins (root-most first), then the shallowest file, then path order.
+ * Returns null for an empty scan so the caller can leave the address bar alone.
+ */
+function firstWorkspaceHtmlFile(workspace) {
+  var files = workspaceFiles(workspace);
+  var best = null;
+  var bestRank = null;
+  files.forEach(function (file) {
+    var path = String((file && file.path) || '');
+    if (path === '') return;
+    var name = String((file && file.name) || workspacePathName(path)).toLowerCase();
+    var depth = path.split('/').length - 1;
+    var entryPoint = name === 'index.html' || name === 'index.htm' ? 0 : 1;
+    var rank = [entryPoint, depth, path];
+    if (best === null || compareWorkspaceFileRank(rank, bestRank) < 0) {
+      best = file;
+      bestRank = rank;
+    }
+  });
+  return best;
+}
+
+/** Lexicographic rank compare for `firstWorkspaceHtmlFile`. */
+function compareWorkspaceFileRank(left, right) {
+  for (var index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue;
+    return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
+}
+
 function workspaceChanges(workspace) {
   return workspace && workspace.git && Array.isArray(workspace.git.changes) ? workspace.git.changes : [];
 }

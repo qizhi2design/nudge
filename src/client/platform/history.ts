@@ -39,6 +39,10 @@ function recordOperation(tabId, operation) {
             at: now,
             syncStatus: 'preview',
             coalesceKey: key,
+            // Replay is page-scoped: an op only re-applies on the page it was
+            // recorded on. `persisted` is owned by the Host result, not by the
+            // recorder, so the operation's own value passes through untouched.
+            pageUrl: operation.pageUrl || '',
           },
           operation,
         ),
@@ -64,6 +68,24 @@ function updateOperationStatus(tabId, ids, status, message) {
     var history = historyOf(draft);
     var ops = history.ops.map(function (op) {
       if (set.has(op.id)) return Object.assign({}, op, { syncStatus: status, syncMessage: message || '' });
+      return op;
+    });
+    draft.history = Object.assign({}, history, { ops: ops });
+  });
+}
+
+/**
+ * Remember that the Host committed an operation to disk. Replay must skip these
+ * ops: their change is already in the source and re-applying the captured
+ * selector would hit a different element after the write.
+ */
+function markOperationPersisted(tabId, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return;
+  var set = new Set(ids);
+  mutateTab(tabId, function (draft) {
+    var history = historyOf(draft);
+    var ops = history.ops.map(function (op) {
+      if (set.has(op.id)) return Object.assign({}, op, { persisted: true });
       return op;
     });
     draft.history = Object.assign({}, history, { ops: ops });

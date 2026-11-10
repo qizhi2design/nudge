@@ -57,6 +57,8 @@ function ensureTab(tabId, seed) {
       selectionSeq: 0,
       annotations: [],
       history: { ops: [], index: -1, lastKey: '', lastAt: 0 },
+      // Host-issued element handles keyed by selector (see sync-queue / body).
+      handles: {},
       sync: { status: 'idle', message: '', at: 0 },
       notices: [],
       carrier: 'none',

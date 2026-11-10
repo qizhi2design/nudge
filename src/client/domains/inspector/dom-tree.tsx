@@ -56,6 +56,9 @@ function DomTreePanel(props) {
   var state4 = React.useState('');
   var error = state4[0];
   var setError = state4[1];
+  // Embedded: the dock owns width, border, header and close; this panel is the
+  // scrollable tree body only.
+  var embedded = props.embedded === true;
 
   function loadKey(key, path) {
     if (!carrier || childrenMap[key] !== undefined || loadingMap[key]) return;
@@ -257,47 +260,49 @@ function DomTreePanel(props) {
       'data-dsh-nudge-dom-panel': '',
       'aria-label': t('dom.title'),
       style: {
-        width: 272,
-        flex: 'none',
-        minWidth: 272,
+        width: embedded ? '100%' : 272,
+        flex: embedded ? '1 1 auto' : 'none',
+        minWidth: embedded ? 0 : 272,
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        borderLeft: '1px solid ' + (theme.borderStrong || theme.border),
+        borderLeft: embedded ? 'none' : '1px solid ' + (theme.borderStrong || theme.border),
         background: theme.base,
         color: theme.text,
       },
     },
-    React.createElement(
-      'div',
-      {
-        style: {
-          flex: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          height: 34,
-          padding: '0 6px 0 10px',
-          borderBottom: '1px solid ' + (theme.borderStrong || theme.border),
-          color: theme.text,
-          font: 'var(--dsw-font-xxxs-11, 11.5px/1.3 sans-serif)',
-          fontWeight: 600,
-        },
-      },
-      React.createElement(Icon.dom, { size: 13 }),
-      React.createElement('span', { style: { flex: 1, minWidth: 0 } }, t('dom.title')),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          'aria-label': t('dom.close'),
-          title: t('dom.close'),
-          onClick: props.onClose,
-          style: { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', borderRadius: 5, background: 'transparent', color: theme.muted, cursor: 'pointer' },
-        },
-        React.createElement(Icon.close, { size: 12 }),
-      ),
-    ),
+    embedded
+      ? null
+      : React.createElement(
+          'div',
+          {
+            style: {
+              flex: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 34,
+              padding: '0 6px 0 10px',
+              borderBottom: '1px solid ' + (theme.borderStrong || theme.border),
+              color: theme.text,
+              font: 'var(--dsw-font-xxxs-11, 11.5px/1.3 sans-serif)',
+              fontWeight: 600,
+            },
+          },
+          React.createElement(Icon.dom, { size: 13 }),
+          React.createElement('span', { style: { flex: 1, minWidth: 0 } }, t('dom.title')),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              'aria-label': t('dom.close'),
+              title: t('dom.close'),
+              onClick: props.onClose,
+              style: { width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 'none', borderRadius: 5, background: 'transparent', color: theme.muted, cursor: 'pointer' },
+            },
+            React.createElement(Icon.close, { size: 12 }),
+          ),
+        ),
     React.createElement(
       'div',
       {

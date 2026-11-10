@@ -95,6 +95,9 @@ async function appendClientDebugLog(entry) {
  * it stays configurable through the profile patch for power users but is not
  * shown in the plugin settings page.
  */
+/** Capabilities the Client may feature-detect through `ping`. */
+const HOST_CAPABILITIES = Object.freeze(['structure-v1', 'insert', 'handle', 'candidates'])
+
 const DEFAULT_CONFIG = Object.freeze({
   language: 'auto',
   enableAnnotate: true,
@@ -344,6 +347,24 @@ async function checkPluginUpdates(ctx) {
   }
 }
 
+/**
+ * Turn the plugin manager's structured failure into one readable line.
+ * `updateBundle` reports `{code, diagnostic?, incompatible?}`; the caller only
+ * needs a message the Settings card can show, never a raw thrown error.
+ */
+function updateFailureMessage(outcome) {
+  const error = outcome !== null && typeof outcome === 'object' ? outcome.error : undefined
+  if (error === undefined || error === null) return 'the DSH plugin manager did not report a reason'
+  if (typeof error === 'string') return error
+  const parts = []
+  if (typeof error.diagnostic === 'string' && error.diagnostic !== '') parts.push(error.diagnostic)
+  if (typeof error.code === 'string' && error.code !== '') parts.push('(' + error.code + ')')
+  if (Array.isArray(error.incompatible) && error.incompatible.length > 0) {
+    parts.push('incompatible: ' + error.incompatible.map((item) => String(item && item.name ? item.name : item)).join(', '))
+  }
+  return parts.length > 0 ? parts.join(' ') : 'update failed'
+}
+
 /** PATH flavour helper for the platform that owns a path. */
 function pathApiFor(path) {
   return /^[A-Za-z]:[\\/]|^\\\\/.test(path) || path.includes('\\') ? win32 : posix
@@ -508,12 +529,76 @@ export function apply(ctx, rawConfig) {
     return out
   }
 
+  // --------------------------------------------------------- update snapshot
+
+  /**
+   * 已发布版本检查的缓存快照。
+   *
+   * 设置页打开时会立刻调用 `about()`（不带 check）；如果每次都去问 npm，
+   * 页面要等一次网络往返才有内容。所以启动后（pluginManager 可用时）先自动
+   * 检查一次并缓存，`about()` 未显式要求 check 时直接读快照。
+   *
+   * 只有 registry（npm）安装的包能自动更新：本插件以 link/本地目录方式安装
+   * 时，pluginManager 会把 listVersions 判为 not-updatable，这里如实缓存为
+   * unavailable，页面显示“无法在线检查更新”。
+   */
+  let updateSnapshot = null
+  let updateCheck = null
+  let startupChecked = false
+
+  /** pluginManager 是否已挂载且具备版本查询能力。 */
+  function pluginManagerReady() {
+    const manager = ctx.get('pluginManager')
+    return manager !== undefined && manager !== null && typeof manager.listVersions === 'function'
+  }
+
+  /** 记住一次检查结果（失败/不可用也照实缓存，页面据实展示）。 */
+  function rememberUpdate(snapshot) {
+    updateSnapshot =
+      snapshot !== null && typeof snapshot === 'object'
+        ? snapshot
+        : { status: 'error', message: 'invalid update snapshot' }
+    return updateSnapshot
+  }
+
+  /**
+   * 开始一次检查；同一时刻只保留一个在途请求，避免启动检查和设置页手动检查
+   * 同时打两次 registry。
+   */
+  function startUpdateCheck() {
+    if (updateCheck !== null) return updateCheck
+    updateCheck = checkPluginUpdates(ctx)
+      .then(rememberUpdate)
+      .catch((error) => ({ status: 'error', message: reasonOf(error) }))
+      .finally(() => {
+        updateCheck = null
+      })
+    return updateCheck
+  }
+
+  // pluginManager 是可选的 Host 能力：等它在这个 plugin 的上下文里就绪后再做
+  // 启动检查；重复的 inject 回调（服务重载）只跑一次。
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['pluginManager'], () => {
+      // 正常 Cordis 只会在服务就绪时回调；带 `get` 之外形态的测试上下文也
+      // 可能先回调一次，因此再确认一次，避免误缓存 unavailable。
+      if (!pluginManagerReady()) return
+      if (startupChecked || updateSnapshot !== null) return
+      startupChecked = true
+      // 启动检查不阻塞 apply：失败会在 about() 里按缓存快照展示。
+      startUpdateCheck()
+    })
+  }
+
   // ------------------------------------------------------------- remote API
 
   const api = {
     /** Liveness probe used by the panel's connection pill. */
     async ping() {
-      return { ok: true, version: '0.1.0' }
+      // Capabilities let the Client detect a stale Host half in the same DSH
+      // process (the Host is a long-lived Node module; a page reload can run a
+      // newer Client bundle). Never hard-fail on an older Host.
+      return { ok: true, version: '0.1.0', capabilities: HOST_CAPABILITIES.slice() }
     },
 
     /**
@@ -592,7 +677,13 @@ export function apply(ctx, rawConfig) {
 
     /**
      * Settings → 关于与更新 snapshot: package version, build artifact times,
-     * local git facts, runtime facts and (optionally) a published-version check.
+     * local git facts, runtime facts and the published-version state.
+     *
+     * `check === true` forces a fresh registry lookup (the manual “检查更新”
+     * button). Otherwise the startup snapshot is returned, so opening the page
+     * shows the result immediately; a page opened before the startup check
+     * finished lazily runs the same single cached check.
+     *
      * Designed for the local-link development install: it never claims a newer
      * version exists when the plugin manager reports the install as not
      * updatable.
@@ -601,7 +692,20 @@ export function apply(ctx, rawConfig) {
       try {
         const facts = await readPluginFacts()
         const git = await readGitFacts()
-        const update = check === true ? await checkPluginUpdates(ctx) : { status: 'unchecked' }
+        let update
+        if (check === true) {
+          update = rememberUpdate(await checkPluginUpdates(ctx))
+        } else if (updateSnapshot !== null) {
+          update = updateSnapshot
+        } else if (updateCheck !== null) {
+          update = await updateCheck
+        } else if (pluginManagerReady()) {
+          update = await startUpdateCheck()
+        } else {
+          // 还没有 pluginManager（或从未检查过）：保持“尚未检查”语义，避免
+          // 把“本机没有 registry 安装”误报成“更新不可用”。
+          update = { status: 'unchecked' }
+        }
         return {
           name,
           version: facts.version,
@@ -617,6 +721,77 @@ export function apply(ctx, rawConfig) {
         }
       } catch (error) {
         throw remoteError(error)
+      }
+    },
+
+    /**
+     * Settings → 关于与更新: install the newest published version.
+     *
+     * 为什么只走 pluginManager.updateBundle，而不是自己 npm install：
+     * - updateBundle 只对“从 npm registry 安装、且 spec 就是包名本身”的包生效；
+     *   link/本地开发安装会被 manager 以 not-updatable 拒绝，这里返回 failed，
+     *   设置页显示原因，绝不悄悄改动开发环境。
+     * - 卸载旧版、安装精确新版、DSH 版本兼容性校验，以及失败后的回滚都由 DSH
+     *   负责；本插件只把结果翻译成页面能展示的 status/message。
+     * - 任何异常都收敛为 { status: 'failed' }，不向 RPC 抛错，避免设置页崩溃。
+     */
+    async update(version) {
+      let manager
+      try {
+        manager = ctx.get('pluginManager')
+      } catch (error) {
+        return { status: 'failed', message: reasonOf(error) }
+      }
+      if (manager === undefined || manager === null || typeof manager.updateBundle !== 'function') {
+        return { status: 'failed', message: 'the DSH plugin manager is not available' }
+      }
+      const installed =
+        updateSnapshot !== null && typeof updateSnapshot.installed === 'string' ? updateSnapshot.installed : undefined
+      const requested = typeof version === 'string' ? version.trim() : ''
+      const snapshotLatest =
+        updateSnapshot !== null && typeof updateSnapshot.latest === 'string' ? updateSnapshot.latest : ''
+      const target = requested !== '' ? requested : snapshotLatest
+      if (target === '') return { status: 'failed', message: 'a published version is required' }
+      const requestId =
+        'nudge-update-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+      try {
+        const result = await manager.updateBundle(name, target, { requestId })
+        const outcome =
+          result !== null && typeof result === 'object' && result.result !== null && typeof result.result === 'object'
+            ? result.result
+            : {}
+        const application = typeof outcome.application === 'string' ? outcome.application : 'failed'
+        const from = result !== null && typeof result === 'object' && typeof result.from === 'string' ? result.from : installed
+        const to = result !== null && typeof result === 'object' && typeof result.to === 'string' ? result.to : target
+        if (application === 'applied' || application === 'restart-required') {
+          // 成功：快照改成“已是最新”，下次打开设置页不再提示可更新。
+          updateSnapshot = {
+            status: 'current',
+            installed: to,
+            latest: undefined,
+            versions: [],
+            registry: updateSnapshot === null ? undefined : updateSnapshot.registry,
+          }
+          return {
+            status: application === 'applied' ? 'updated' : 'restart-required',
+            from,
+            to,
+            restart: application !== 'applied',
+          }
+        }
+        if (application === 'cancelled') {
+          return { status: 'failed', from, to, message: 'the update was cancelled' }
+        }
+        return {
+          status: 'failed',
+          from,
+          to,
+          message: updateFailureMessage(outcome),
+          // updateBundle 在 HMR 卸载旧版后安装失败时会重新装回旧版。
+          restored: result !== null && typeof result === 'object' && result.restore !== undefined && result.restore !== null,
+        }
+      } catch (error) {
+        return { status: 'failed', from: installed, to: target, message: reasonOf(error) }
       }
     },
 
@@ -829,6 +1004,7 @@ export function apply(ctx, rawConfig) {
       remoteInvocation('config', []),
       remoteInvocation('configUpdate', ['patch']),
       remoteInvocation('about', ['check']),
+      remoteInvocation('update', ['version']),
       remoteInvocation('session', ['session']),
       remoteInvocation('sync', ['session', 'page', 'edits']),
       remoteInvocation('saveScreenshot', ['session', 'annotationId', 'dataUrl']),

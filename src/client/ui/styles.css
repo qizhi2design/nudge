@@ -6,3 +6,25 @@
     @apply dshnudge-z-[2147483000] dshnudge-rounded-md dshnudge-px-2 dshnudge-py-1 dshnudge-text-[11px] dshnudge-shadow-lg;
   }
 }
+
+/* Auto-reload has a waiting update: breathe the selected pill so the pending
+   state is noticeable without moving the icon (it is not reloading yet). */
+@keyframes dshnudge-hot-reload-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dshnudge-pulse-color, #f59e0b) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--dshnudge-pulse-color, #f59e0b) 24%, transparent);
+  }
+}
+
+.dshnudge-hot-reload-pending {
+  animation: dshnudge-hot-reload-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dshnudge-hot-reload-pending {
+    animation: none;
+  }
+}

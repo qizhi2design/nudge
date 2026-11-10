@@ -23,15 +23,376 @@ function syncNoticeSuffix(detail) {
 }
 
 /**
+ * Default page for a freshly opened workspace folder: scan the session
+ * workspace, pick its first HTML file and start the Host static preview server
+ * for it. Returns the preview URL, or null when the workspace has no HTML or
+ * the Host cannot serve one. This is a convenience default, so every failure
+ * stays silent instead of surfacing an error into the UI.
+ */
+function defaultWorkspaceUrl(remote, sessionId) {
+  if (sessionId === '' || typeof remote !== 'function') return Promise.resolve(null);
+  return Promise.resolve(remote('workspace', workspaceArgs(sessionId)))
+    .then(function (snapshot) {
+      var file = firstWorkspaceHtmlFile(snapshot);
+      if (file === null) return null;
+      return Promise.resolve(remote('previewOpen', previewOpenArgs(sessionId, file.path))).then(function (result) {
+        return result && typeof result.url === 'string' && result.url !== '' ? result.url : null;
+      });
+    })
+    .catch(function () {
+      return null;
+    });
+}
+
+/** Host locate/patch reason → locale key. Unknown codes stay verbatim. */
+var SYNC_REASON_KEYS = {
+  'unresolved-element': 'source.reasonUnresolved',
+  'ambiguous-element': 'source.reasonAmbiguous',
+  'path-mismatch': 'source.reasonPathMismatch',
+  'protected-element': 'source.reasonProtected',
+  'unresolved-target-parent': 'source.reasonTargetParent',
+  'unresolved-target-anchor': 'source.reasonTargetAnchor',
+  'invalid-move-target': 'source.reasonInvalidMove',
+  'unsupported-target-parent': 'source.reasonUnsupportedParent',
+  'unsupported-js-source': 'source.reasonJsSource',
+  'unsafe-js-context': 'source.reasonJsSource',
+  'stale-handle': 'source.reasonStaleHandle',
+  'file-too-large': 'source.reasonTooLarge',
+  'no-source-mapping': 'source.reasonNoMapping',
+  'unsupported-edit-kind': 'source.reasonUnsupportedKind',
+  'unsupported-source-type': 'source.reasonUnsupportedSource',
+  'invalid-edit': 'source.reasonInvalidEdit',
+  'file-missing': 'source.reasonMissingFile',
+  'read-failed': 'source.reasonIoFailed',
+  'write-failed': 'source.reasonIoFailed',
+  'stale-version': 'source.reasonStaleVersion',
+  'internal-error': 'source.reasonInternal',
+  'fs-unavailable': 'source.reasonInternal',
+  'workspace-unavailable': 'source.reasonInternal',
+  'read-only-policy': 'source.reasonReadOnly',
+};
+
+/**
  * Localised copy for the Host's source-locate failure reasons. Unknown reasons
  * fall through verbatim so a new Host code stays debuggable instead of hidden.
  */
 function syncReasonText(t, reason) {
   var text = reason === null || reason === undefined ? '' : String(reason).trim();
-  if (text === 'unresolved-element') return t('source.reasonUnresolved');
-  if (text === 'ambiguous-element') return t('source.reasonAmbiguous');
-  if (text === 'path-mismatch') return t('source.reasonPathMismatch');
-  return text;
+  var key = SYNC_REASON_KEYS[text];
+  return key === undefined ? text : t(key);
+}
+
+/**
+ * Locale strings forwarded into the injected page runtime (selection card,
+ * annotate bar). Kept top-level so the forwarding contract is testable.
+ */
+function buildRuntimeLocale(t) {
+  return {
+    annotation: {
+      popoverTitle: t('annotation.popoverTitle'),
+      popoverSubtitle: t('annotation.popoverSubtitle'),
+      placeholder: t('annotation.placeholder'),
+      cancel: t('annotation.cancel'),
+      add: t('annotation.add'),
+      region: t('annotation.region'),
+      designTitle: t('annotation.designTitle'),
+      designColor: t('annotation.designColor'),
+      designBackground: t('annotation.designBackground'),
+      designOpacity: t('annotation.designOpacity'),
+      designFont: t('annotation.designFont'),
+      designFontSize: t('annotation.designFontSize'),
+      designFontWeight: t('annotation.designFontWeight'),
+      designCancel: t('annotation.designCancel'),
+      designApply: t('annotation.designApply'),
+      designClose: t('annotation.designClose'),
+      designPreview: t('annotation.designPreview'),
+      statusAnnotating: t('annotation.statusAnnotating'),
+      statusSend: t('annotation.statusSend'),
+      statusExit: t('annotation.statusExit'),
+      statusRemove: t('annotation.statusRemove'),
+      statusLocate: t('annotation.statusLocate'),
+      statusHideMarkers: t('annotation.statusHideMarkers'),
+      statusShowMarkers: t('annotation.statusShowMarkers'),
+      statusDiscard: t('annotation.statusDiscard'),
+      statusDiscardArmed: t('annotation.statusDiscardArmed'),
+      statusMoveToolbar: t('annotation.statusMoveToolbar'),
+      designLayout: t('dock.layout'),
+      designSpacing: t('dock.spacing'),
+      designTypography: t('dock.typography'),
+      designAppearance: t('dock.appearance'),
+      designAdvanced: t('dock.advanced'),
+      designWidth: t('dock.width'),
+      designHeight: t('dock.height'),
+      designDisplay: t('dock.display'),
+      designPosition: t('dock.position'),
+      designOverflow: t('dock.overflow'),
+      designMargin: t('dock.margin'),
+      designPadding: t('dock.padding'),
+      designGap: t('dock.gap'),
+      designLineHeight: t('dock.lineHeight'),
+      designLetterSpacing: t('dock.letterSpacing'),
+      designTextAlign: t('dock.textAlign'),
+      designBorder: t('dock.border'),
+      designBorderRadius: t('dock.borderRadius'),
+      designShadow: t('dock.shadow'),
+      designTransform: t('dock.transform'),
+      designZIndex: t('dock.zIndex'),
+      designVisibility: t('dock.visibility'),
+      designContent: t('dock.content'),
+      designDom: t('dock.dom'),
+      designTextContent: t('dock.textContent'),
+      designNoDirectText: t('dock.noDirectText'),
+      designAncestors: t('dock.ancestors'),
+      designDescendants: t('dock.descendants'),
+      designNoDescendants: t('dock.noDescendants'),
+      designDelete: t('annotation.designDelete'),
+      designDeleteHint: t('annotation.designDeleteHint'),
+      designMoveHint: t('annotation.designMoveHint'),
+    },
+  };
+}
+
+/**
+ * Ops that a page load may re-apply to the live DOM: only the applied part of
+ * the history, never undone / already-persisted ops, and only ops recorded on
+ * this same page (a persisted structure op would otherwise hit a shifted sibling).
+ */
+function replayableOperations(history, pageUrl) {
+  var ops = history && Array.isArray(history.ops) ? history.ops : [];
+  var index = history && typeof history.index === 'number' ? history.index : -1;
+  return ops.slice(0, index + 1).filter(function (op) {
+    if (!op) return false;
+    if (op.syncStatus === 'undone') return false;
+    if (op.persisted === true) return false;
+    if (op.pageUrl && op.pageUrl !== pageUrl) return false;
+    return true;
+  });
+}
+
+/** One history op → the runtime `reapply` edit that reproduces it. */
+function runtimeEditFor(op) {
+  if (!op) return null;
+  if (op.kind === 'style') return { kind: 'style', selector: op.selector, property: op.property, value: op.after };
+  if (op.kind === 'text') return { kind: 'text', selector: op.selector, value: op.after };
+  if (op.kind === 'remove') return { kind: 'remove', selector: op.selector, path: op.path, outerHTML: op.outerHTML };
+  if (op.kind === 'move') {
+    return {
+      kind: 'move',
+      selector: op.selector,
+      path: op.path,
+      outerHTML: op.outerHTML,
+      targetParentSelector: op.targetParentSelector,
+      targetParentPath: op.targetParentPath,
+      targetParentOuterHTML: op.targetParentOuterHTML,
+      beforeSelector: op.beforeSelector == null ? null : op.beforeSelector,
+      beforePath: op.beforePath,
+      beforeOuterHTML: op.beforeOuterHTML,
+    };
+  }
+  if (op.kind === 'insert') {
+    return {
+      kind: 'insert',
+      html: op.html || op.outerHTML,
+      targetParentSelector: op.targetParentSelector,
+      beforeSelector: op.beforeSelector,
+    };
+  }
+  return { kind: 'attr', selector: op.selector, attrName: op.attrName, value: op.after };
+}
+
+/**
+ * Apply the runtime half of one undo/redo step. Structure ops use the dedicated
+ * carrier inverse commands; redo replays the op's original runtime edit.
+ */
+function applyInverse(carrier, op, direction) {
+  if (op.kind === 'style') return carrier.applyStyle(op.selector, op.property, direction === 'undo' ? op.before : op.after);
+  if (op.kind === 'text') return carrier.applyText(op.selector, direction === 'undo' ? op.before : op.after);
+  if (op.kind === 'attr') return carrier.applyAttr(op.selector, op.attrName, direction === 'undo' ? op.before : op.after);
+  if (op.kind === 'remove') {
+    if (direction === 'undo') {
+      return carrier.applyInsert({
+        parentSelector: op.parentSelector,
+        beforeSelector: op.beforeSelector,
+        html: op.outerHTML,
+      });
+    }
+    return carrier.reapply([runtimeEditFor(op)]);
+  }
+  if (op.kind === 'move') {
+    if (direction === 'undo') {
+      return carrier.applyMoveElement({
+        elementKey: op.elementKey,
+        parentSelector: op.fromParentSelector,
+        beforeSelector: op.fromBeforeSelector,
+      });
+    }
+    return carrier.reapply([runtimeEditFor(op)]);
+  }
+  if (op.kind === 'insert') {
+    if (direction === 'undo') {
+      return carrier.reapply([{ kind: 'remove', selector: op.selector, path: op.path, outerHTML: op.outerHTML }]);
+    }
+    return carrier.reapply([runtimeEditFor(op)]);
+  }
+  return Promise.resolve(null);
+}
+
+/** The source-write edit a history step should queue, or null when none applies. */
+function followUpOperation(op, direction, result) {
+  if (op.kind === 'remove') {
+    if (direction === 'undo') {
+      return {
+        id: 'undo|' + op.id + '|' + Date.now(),
+        kind: 'insert',
+        html: op.outerHTML,
+        outerHTML: op.outerHTML,
+        textBefore: op.textBefore,
+        textSnippet: op.textSnippet,
+        elementKey: op.elementKey,
+        targetParentSelector: op.parentSelector,
+        beforeSelector: op.beforeSelector,
+        sourceHints: op.sourceHints,
+        coalesceKey: '',
+      };
+    }
+    return {
+      id: 'redo|' + op.id + '|' + Date.now(),
+      kind: 'remove',
+      selector: op.selector,
+      path: op.path,
+      outerHTML: op.outerHTML,
+      textBefore: op.textBefore,
+      textSnippet: op.textSnippet,
+      elementKey: op.elementKey,
+      parentSelector: op.parentSelector,
+      beforeSelector: op.beforeSelector,
+      sourceHints: op.sourceHints,
+      coalesceKey: '',
+    };
+  }
+  if (op.kind === 'move') {
+    if (direction === 'undo') {
+      var restoredSelector = result && result.selector ? String(result.selector) : '';
+      if (restoredSelector === '') return null;
+      return {
+        id: 'undo|' + op.id + '|' + Date.now(),
+        kind: 'move',
+        selector: restoredSelector,
+        outerHTML: op.outerHTML,
+        textBefore: op.textBefore,
+        textSnippet: op.textSnippet,
+        elementKey: op.elementKey,
+        targetParentSelector: op.fromParentSelector,
+        beforeSelector: op.fromBeforeSelector,
+        fromParentSelector: op.targetParentSelector,
+        fromBeforeSelector: op.beforeSelector,
+        sourceHints: op.sourceHints,
+        coalesceKey: '',
+      };
+    }
+    return {
+      id: 'redo|' + op.id + '|' + Date.now(),
+      kind: 'move',
+      selector: op.selector,
+      path: op.path,
+      outerHTML: op.outerHTML,
+      textBefore: op.textBefore,
+      textSnippet: op.textSnippet,
+      elementKey: op.elementKey,
+      targetParentSelector: op.targetParentSelector,
+      targetParentPath: op.targetParentPath,
+      targetParentOuterHTML: op.targetParentOuterHTML,
+      beforeSelector: op.beforeSelector,
+      beforePath: op.beforePath,
+      beforeOuterHTML: op.beforeOuterHTML,
+      fromParentSelector: op.fromParentSelector,
+      fromBeforeSelector: op.fromBeforeSelector,
+      sourceHints: op.sourceHints,
+      coalesceKey: '',
+    };
+  }
+  if (op.kind === 'insert') {
+    if (direction === 'undo') return null;
+    return {
+      id: 'redo|' + op.id + '|' + Date.now(),
+      kind: 'insert',
+      html: op.html || op.outerHTML,
+      outerHTML: op.html || op.outerHTML,
+      targetParentSelector: op.targetParentSelector,
+      beforeSelector: op.beforeSelector,
+      sourceHints: op.sourceHints,
+      coalesceKey: '',
+    };
+  }
+  // style / text / attr keep the pre-existing inverse-record shape.
+  var value = direction === 'undo' ? op.before : op.after;
+  return {
+    id: 'undo|' + op.id + '|' + Date.now(),
+    opId: op.id,
+    kind: op.kind,
+    selector: op.selector,
+    path: op.path,
+    property: op.property,
+    value: op.kind === 'style' ? value : undefined,
+    before: direction === 'undo' ? op.after : op.before,
+    after: value,
+    attrName: op.attrName,
+    sourceHints: op.sourceHints,
+    outerHTML: op.outerHTML,
+    textSnippet: op.textSnippet,
+  };
+}
+
+/**
+ * A structure edit whose element capture was cut at 64 KiB cannot be written
+ * back safely (the Host would patch an incomplete snippet), so the source stays
+ * untouched and the step reports why.
+ */
+function truncatedStructureCapture(op, direction) {
+  if (op.outerHTMLTruncated !== true) return false;
+  if (direction === 'redo') return true;
+  return direction === 'undo' && op.kind === 'remove';
+}
+
+/**
+ * Run one undo/redo step with every side effect injected, so the inverse rules
+ * stay testable without a live carrier or store.
+ */
+function applyHistoryStep(deps, direction) {
+  var carrier = deps.carrier;
+  if (!carrier) return Promise.resolve(false);
+  var t = typeof deps.translate === 'function' ? deps.translate : function (key) { return key; };
+  var history = historyOf(deps.tab);
+  var op = direction === 'undo' ? history.ops[history.index] : history.ops[history.index + 1];
+  if (!op) return Promise.resolve(false);
+  var structure = op.kind === 'remove' || op.kind === 'move' || op.kind === 'insert';
+  return Promise.resolve(applyInverse(carrier, op, direction))
+    .then(function (result) {
+      if (direction === 'undo' && op.kind === 'move') {
+        if (!(result && result.ok !== false && result.selector)) {
+          var reason = result && result.reason ? String(result.reason) : 'move-undo-failed';
+          if (deps.notice) deps.notice('error', t('dock.structureUndoFailed', { reason: syncReasonText(t, reason) }));
+          return false;
+        }
+      }
+      if (deps.advance) deps.advance(direction);
+      var truncated = structure && truncatedStructureCapture(op, direction);
+      if (truncated) {
+        if (deps.notice) deps.notice('error', t('dock.structureUndoTruncated'));
+      } else {
+        var record = followUpOperation(op, direction, result);
+        if (record && deps.enqueue) deps.enqueue(record);
+      }
+      if (deps.mark) deps.mark(op, direction === 'undo' ? 'undone' : op.persisted === true ? 'synced' : 'preview');
+      if (deps.refresh) deps.refresh();
+      if (structure && direction === 'undo' && !truncated && deps.notice) deps.notice('info', t('dock.structureUndoDone'));
+      return true;
+    })
+    .catch(function (error) {
+      var message = error instanceof Error ? error.message : String(error);
+      if (deps.notice) deps.notice('error', t('dock.structureUndoFailed', { reason: message }));
+      return false;
+    });
 }
 
 function NudgeBody(props) {
@@ -95,6 +456,7 @@ function NudgeBody(props) {
   React.useEffect(function () {
     setFloatingComposerLabels({
       collapse: t('floating.collapse'),
+      shrink: t('floating.shrink'),
       expand: t('floating.expand'),
     });
   }, [t]);
@@ -109,12 +471,28 @@ function NudgeBody(props) {
     return sessionId ? workspaceKeyFor(sessionId, workspaces) : 'session:none';
   }, [sessionId, workspaces && workspaces.phase, workspaces && workspaces.items]);
   var [sending, setSending] = React.useState(false);
-  var domState = React.useState(false);
-  var domOpen = domState[0];
-  var setDomOpen = domState[1];
-  var workspaceState = React.useState(false);
-  var workspaceOpen = workspaceState[0];
-  var setWorkspaceOpen = workspaceState[1];
+  // One dock, one panel: DOM tree and Workspace used to open side by side and
+  // squeezed the page to zero. `dock` is the single source of truth; the toolbar
+  // still consumes domOpen / workspaceOpen, which now describe the active tab.
+  var dockState = React.useState('none');
+  var dock = dockState[0];
+  var setDock = dockState[1];
+  var domOpen = dock === 'dom';
+  var workspaceOpen = dock === 'workspace';
+  function toggleDock(next) {
+    setDock(function (previous) {
+      return previous === next ? 'none' : next;
+    });
+  }
+  var dockWidthState = React.useState(readDockWidth);
+  var dockWidth = dockWidthState[0];
+  var setDockWidth = dockWidthState[1];
+  var dockHostRef = React.useRef(null);
+  var dockHostState = React.useState(0);
+  var dockHostWidth = dockHostState[0];
+  var setDockHostWidth = dockHostState[1];
+  // The workspace panel owns its refresh action; the dock header borrows it.
+  var workspaceRefreshRef = React.useRef(null);
   var [notice, setNotice] = React.useState(null);
   // Host annotate bar mirror: the floating dock covers the in-page bar, so the
   // dock renders its own bar and needs the marker-toggle state.
@@ -124,66 +502,7 @@ function NudgeBody(props) {
   var markersHiddenRef = React.useRef(false);
   markersHiddenRef.current = markersHidden;
   var runtimeLocale = React.useMemo(function () {
-    return {
-      annotation: {
-        popoverTitle: t('annotation.popoverTitle'),
-        popoverSubtitle: t('annotation.popoverSubtitle'),
-        placeholder: t('annotation.placeholder'),
-        cancel: t('annotation.cancel'),
-        add: t('annotation.add'),
-        region: t('annotation.region'),
-        designTitle: t('annotation.designTitle'),
-        designColor: t('annotation.designColor'),
-        designBackground: t('annotation.designBackground'),
-        designOpacity: t('annotation.designOpacity'),
-        designFont: t('annotation.designFont'),
-        designFontSize: t('annotation.designFontSize'),
-        designFontWeight: t('annotation.designFontWeight'),
-        designCancel: t('annotation.designCancel'),
-        designApply: t('annotation.designApply'),
-        designClose: t('annotation.designClose'),
-        designPreview: t('annotation.designPreview'),
-        statusAnnotating: t('annotation.statusAnnotating'),
-        statusSend: t('annotation.statusSend'),
-        statusExit: t('annotation.statusExit'),
-        statusRemove: t('annotation.statusRemove'),
-        statusLocate: t('annotation.statusLocate'),
-        statusHideMarkers: t('annotation.statusHideMarkers'),
-        statusShowMarkers: t('annotation.statusShowMarkers'),
-        statusDiscard: t('annotation.statusDiscard'),
-        statusDiscardArmed: t('annotation.statusDiscardArmed'),
-        statusMoveToolbar: t('annotation.statusMoveToolbar'),
-        designLayout: t('dock.layout'),
-        designSpacing: t('dock.spacing'),
-        designTypography: t('dock.typography'),
-        designAppearance: t('dock.appearance'),
-        designAdvanced: t('dock.advanced'),
-        designWidth: t('dock.width'),
-        designHeight: t('dock.height'),
-        designDisplay: t('dock.display'),
-        designPosition: t('dock.position'),
-        designOverflow: t('dock.overflow'),
-        designMargin: t('dock.margin'),
-        designPadding: t('dock.padding'),
-        designGap: t('dock.gap'),
-        designLineHeight: t('dock.lineHeight'),
-        designLetterSpacing: t('dock.letterSpacing'),
-        designTextAlign: t('dock.textAlign'),
-        designBorder: t('dock.border'),
-        designBorderRadius: t('dock.borderRadius'),
-        designShadow: t('dock.shadow'),
-        designTransform: t('dock.transform'),
-        designZIndex: t('dock.zIndex'),
-        designVisibility: t('dock.visibility'),
-        designContent: t('dock.content'),
-        designDom: t('dock.dom'),
-        designTextContent: t('dock.textContent'),
-        designNoDirectText: t('dock.noDirectText'),
-        designAncestors: t('dock.ancestors'),
-        designDescendants: t('dock.descendants'),
-        designNoDescendants: t('dock.noDescendants'),
-      },
-    };
+    return buildRuntimeLocale(t);
   }, [t]);
 
   // ----------------------------------------------------------- source sync queue
@@ -193,8 +512,27 @@ function NudgeBody(props) {
       tabId,
       function () { return tabRef.current; },
       function () { return sessionIdRef.current; },
+      function (meta) {
+        // Host-issued element handles are the cheapest locator for the next edit
+        // on the same selector; preview candidates stay on the tab for diagnostics.
+        if (!meta) return;
+        mutateTab(tabId, function (draft) {
+          if (meta.handles && Object.keys(meta.handles).length > 0) {
+            draft.handles = Object.assign({}, draft.handles || {}, meta.handles);
+          }
+          if (meta.candidates && meta.candidates.length > 0) {
+            draft.sync = Object.assign({}, draft.sync || {}, { candidates: meta.candidates });
+          }
+        });
+      },
     );
   }
+
+  // ------------------------------------------------ Host capability handshake
+  React.useEffect(function () {
+    probeHostCapabilities(props.ctx).catch(function () {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --------------------------------------------------------- sync feedback
   // The queue only writes `tab.sync`; without this bridge a dropped batch looks
@@ -203,12 +541,36 @@ function NudgeBody(props) {
   var syncStatus = syncState && typeof syncState.status === 'string' ? syncState.status : 'idle';
   var syncAt = syncState && typeof syncState.at === 'number' ? syncState.at : 0;
   React.useEffect(function () {
+    // Only a fully synced batch auto-dismisses: error / partial / preview copy
+    // must stay until the next sync (or the user closes it) or the write-back
+    // problem would disappear with the toast.
     if (syncStatus === 'error') {
       setNotice({ tone: 'error', text: t('dock.syncFailed') + syncNoticeSuffix(syncState && syncState.message) });
       return undefined;
     }
+    if (syncStatus === 'partial') {
+      var partialMeta = syncState && syncState.meta ? syncState.meta : null;
+      var partialText;
+      if (partialMeta && typeof partialMeta.synced === 'number') {
+        partialText = t('dock.syncPartialText', {
+          synced: String(partialMeta.synced),
+          preview: String(partialMeta.preview),
+          reason: syncReasonText(t, partialMeta.reason),
+        });
+      } else {
+        partialText = (syncState && syncState.message ? String(syncState.message) : '') || t('dock.syncPartial');
+      }
+      setNotice({ tone: 'warning', text: partialText });
+      return undefined;
+    }
     if (syncStatus === 'preview') {
       var reason = syncState && syncState.message ? String(syncState.message) : '';
+      // A reason code the Host does not even recognize while the Host lacks the
+      // `insert` capability is a build mismatch, not a locate failure: say so.
+      if (reason === 'unsupported-edit-kind' && !hostHasCapability('insert')) {
+        setNotice({ tone: 'warning', text: t('dock.syncHostStale') });
+        return undefined;
+      }
       var reasonText = reason === 'no-source-mapping' ? '' : syncReasonText(t, reason);
       setNotice({
         tone: 'info',
@@ -295,11 +657,25 @@ function NudgeBody(props) {
       }
     }
     if (!initialUrl && tabRef.current.url) initialUrl = tabRef.current.url;
+    var cancelled = false;
     carrier.mount().then(function () {
+      if (cancelled) return;
       if (initialUrl && isHttpUrl(initialUrl)) {
         patchTab(tabId, { url: initialUrl });
         carrier.load(initialUrl);
+        return;
       }
+      if (initialUrl || tabRef.current.url) return;
+      // A freshly opened workspace folder has no page yet: land on its first
+      // HTML file so the address bar starts on something real. Never overrides
+      // an explicit / restored URL, and stays a no-op when the Host cannot
+      // serve a preview or the feature is switched off.
+      if (features.enableWorkspaceVersions === false) return;
+      defaultWorkspaceUrl(createRemote(props.ctx), sessionId).then(function (url) {
+        if (cancelled || !url || tabRef.current.url) return;
+        patchTab(tabId, { url: url, error: null });
+        carrier.load(url);
+      });
     });
     var pollTimer = setInterval(function () {
       pollOnce();
@@ -317,6 +693,7 @@ function NudgeBody(props) {
       stopCommands = null;
     }
     return function () {
+      cancelled = true;
       clearInterval(pollTimer);
       if (typeof stopCommands === 'function') {
         try {
@@ -478,9 +855,25 @@ function NudgeBody(props) {
   }, [tab.mode, features.enableAnnotate, features.enableEdit, tabId]);
 
   React.useEffect(function () {
-    if (features.enableDomTree === false && domOpen) setDomOpen(false);
-    if (features.enableWorkspaceVersions === false && workspaceOpen) setWorkspaceOpen(false);
-  }, [features.enableDomTree, features.enableWorkspaceVersions, domOpen, workspaceOpen]);
+    if (features.enableDomTree === false && dock === 'dom') setDock('none');
+    if (features.enableWorkspaceVersions === false && dock === 'workspace') setDock('none');
+  }, [features.enableDomTree, features.enableWorkspaceVersions, dock]);
+
+  // The dock switches from a docked column to an overlay drawer when the tab
+  // body gets too narrow for a split page + panel to both stay usable.
+  React.useEffect(function () {
+    var node = dockHostRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return undefined;
+    var observer = new ResizeObserver(function (entries) {
+      var width = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : node.clientWidth;
+      setDockHostWidth(width);
+    });
+    observer.observe(node);
+    return function () {
+      observer.disconnect();
+    };
+  }, []);
+  var dockOverlay = dockHostWidth > 0 && dockHostWidth < NUDGE_DOCK_NARROW;
 
   // ----------------------------------------------------------- hot reload
   // Poll the Host watcher (~900ms). The first response only records the
@@ -558,6 +951,11 @@ function NudgeBody(props) {
     }).catch(function () {});
   }
 
+  /** Record one applied edit, tagging it with the page it belongs to (replay scope). */
+  function recordEdit(operation) {
+    return recordOperation(tabId, Object.assign({}, operation, { pageUrl: tabRef.current.url || '' }));
+  }
+
   function handleRuntimeEvents(events) {
     var next = null;
     events.forEach(function (event) {
@@ -606,7 +1004,7 @@ function NudgeBody(props) {
           outerHTML: same ? selection.outerHTML : undefined,
           textSnippet: same ? selection.text : undefined,
         };
-        var opId = recordOperation(tabId, operation);
+        var opId = recordEdit(operation);
         enqueueOperation(operation, opId);
         refreshSelection();
       } else if (event.type === 'design-text' && event.selector) {
@@ -623,7 +1021,7 @@ function NudgeBody(props) {
           outerHTML: textSame ? textSelection.outerHTML : undefined,
           textSnippet: textSame ? textSelection.text : undefined,
         };
-        var textOpId = recordOperation(tabId, textOperation);
+        var textOpId = recordEdit(textOperation);
         enqueueOperation(textOperation, textOpId);
         refreshSelection();
       } else if (event.type === 'design-attr' && event.selector && event.attrName) {
@@ -641,7 +1039,7 @@ function NudgeBody(props) {
           outerHTML: attrSame ? attrSelection.outerHTML : undefined,
           textSnippet: attrSame ? attrSelection.text : undefined,
         };
-        var attrOpId = recordOperation(tabId, attrOperation);
+        var attrOpId = recordEdit(attrOperation);
         enqueueOperation(attrOperation, attrOpId);
         refreshSelection();
       } else if (event.type === 'design-structure' && event.selector && (event.op === 'remove' || event.op === 'move')) {
@@ -652,11 +1050,19 @@ function NudgeBody(props) {
           selector: event.selector,
           path: event.path || (structureSame ? structureSelection.path : undefined),
           outerHTML: event.outerHTML || (structureSame ? structureSelection.outerHTML : undefined),
+          outerHTMLTruncated: event.outerHTMLTruncated === true,
+          textBefore: event.textBefore || event.textSnippet || (structureSame ? structureSelection.text : undefined),
           textSnippet: event.textSnippet || (structureSame ? structureSelection.text : undefined),
+          elementKey: event.elementKey,
+          handle: event.handle,
           sourceHints: event.sourceHints || (structureSame ? sourceHintFromDescriptor(structureSelection) : undefined),
           // One structural gesture is one history step; never merge two of them.
           coalesceKey: '',
         };
+        if (event.op === 'remove') {
+          structureOperation.parentSelector = event.parentSelector == null ? null : event.parentSelector;
+          structureOperation.beforeSelector = event.beforeSelector == null ? null : event.beforeSelector;
+        }
         if (event.op === 'move') {
           structureOperation.targetParentSelector = event.targetParentSelector;
           structureOperation.targetParentPath = event.targetParentPath;
@@ -666,8 +1072,10 @@ function NudgeBody(props) {
           structureOperation.beforePath = event.beforePath;
           structureOperation.beforeOuterHTML = event.beforeOuterHTML;
           structureOperation.beforeTextBefore = event.beforeTextBefore;
+          structureOperation.fromParentSelector = event.fromParentSelector == null ? null : event.fromParentSelector;
+          structureOperation.fromBeforeSelector = event.fromBeforeSelector == null ? null : event.fromBeforeSelector;
         }
-        var structureOpId = recordOperation(tabId, structureOperation);
+        var structureOpId = recordEdit(structureOperation);
         enqueueOperation(structureOperation, structureOpId);
         if (event.op === 'remove') patchTab(tabId, { selection: null });
         else refreshSelection();
@@ -679,29 +1087,15 @@ function NudgeBody(props) {
   function restoreRuntime() {
     var carrier = carrierRef.current;
     if (!carrier) return;
-    var edits = (tabRef.current.history && tabRef.current.history.ops ? tabRef.current.history.ops : [])
-      .filter(function (op) { return op.syncStatus !== 'undone'; })
-      .map(function (op) {
-        if (op.kind === 'style') return { kind: 'style', selector: op.selector, property: op.property, value: op.after };
-        if (op.kind === 'text') return { kind: 'text', selector: op.selector, value: op.after };
-        if (op.kind === 'remove') return { kind: 'remove', selector: op.selector, path: op.path, outerHTML: op.outerHTML };
-        if (op.kind === 'move') {
-          return {
-            kind: 'move',
-            selector: op.selector,
-            path: op.path,
-            outerHTML: op.outerHTML,
-            targetParentSelector: op.targetParentSelector,
-            targetParentPath: op.targetParentPath,
-            targetParentOuterHTML: op.targetParentOuterHTML,
-            beforeSelector: op.beforeSelector == null ? null : op.beforeSelector,
-            beforePath: op.beforePath,
-            beforeOuterHTML: op.beforeOuterHTML,
-          };
-        }
-        return { kind: 'attr', selector: op.selector, attrName: op.attrName, value: op.after };
-      });
-    carrier.injectRuntime(tabRef.current.mode, edits).then(function (ok) {
+    var tab = tabRef.current;
+    // Re-apply only the runtime preview of this page: undone ops, ops the Host
+    // already committed to disk, and ops recorded on another page or after the
+    // history pointer are all excluded (a persisted remove would otherwise hit
+    // the next sibling once the source order shifted).
+    var edits = replayableOperations(historyOf(tab), tab.url)
+      .map(runtimeEditFor)
+      .filter(function (edit) { return edit !== null; });
+    carrier.injectRuntime(tab.mode, edits).then(function (ok) {
       if (ok) pollOnce();
     }).catch(function () {});
   }
@@ -752,8 +1146,14 @@ function NudgeBody(props) {
 
   function enqueueOperation(operation, operationId) {
     var opId = operationId || makeId('op');
+    // A handle the Host issued for this selector is the cheapest locator for the
+    // next edit; cached handles travel with every edit kind that has a selector.
+    var cachedHandle = operation.handle;
+    if (!cachedHandle && operation.selector && tabRef.current.handles) {
+      cachedHandle = tabRef.current.handles[operation.selector];
+    }
     queueRef.current.enqueue({
-      id: operation.coalesceKey + '|' + opId,
+      id: (operation.coalesceKey || operation.kind) + '|' + opId,
       opId: opId,
       kind: operation.kind,
       selector: operation.selector,
@@ -765,11 +1165,21 @@ function NudgeBody(props) {
       attrName: operation.attrName,
       sourceHints: operation.sourceHints,
       outerHTML: operation.outerHTML,
+      outerHTMLTruncated: operation.outerHTMLTruncated,
       textSnippet: operation.textSnippet,
+      textBefore: operation.textBefore,
+      elementKey: operation.elementKey,
+      handle: cachedHandle,
+      html: operation.html,
+      parentSelector: operation.parentSelector,
+      beforeSelector: operation.beforeSelector,
+      fromParentSelector: operation.fromParentSelector,
+      fromBeforeSelector: operation.fromBeforeSelector,
       targetParentSelector: operation.targetParentSelector,
+      targetParentPath: operation.targetParentPath,
       targetParentOuterHTML: operation.targetParentOuterHTML,
       targetParentTextBefore: operation.targetParentTextBefore,
-      beforeSelector: operation.beforeSelector,
+      beforePath: operation.beforePath,
       beforeOuterHTML: operation.beforeOuterHTML,
       beforeTextBefore: operation.beforeTextBefore,
     });
@@ -780,53 +1190,39 @@ function NudgeBody(props) {
   var canUndo = history.index >= 0 && history.ops.length > 0;
   var canRedo = history.index < history.ops.length - 1;
 
-  function applyInverse(op, direction) {
-    var carrier = carrierRef.current;
-    if (!carrier) return Promise.resolve();
-    if (op.kind === 'style') return carrier.applyStyle(op.selector, op.property, direction === 'undo' ? op.before : op.after);
-    if (op.kind === 'text') return carrier.applyText(op.selector, direction === 'undo' ? op.before : op.after);
-    return carrier.applyAttr(op.selector, op.attrName, direction === 'undo' ? op.before : op.after);
-  }
-
+  /**
+   * Undo/redo both text/style edits and structure edits. The inverse dependency
+   * bag stays here; the rules live in `applyHistoryStep` (tested in
+   * test/client-smoke.mjs).
+   */
   function stepHistory(direction) {
-    var current = historyOf(tabRef.current);
-    var op = direction === 'undo' ? current.ops[current.index] : current.ops[current.index + 1];
-    if (!op) return;
-    if (op.kind === 'remove' || op.kind === 'move') {
-      // Removing a subtree cannot be reversed inside the page; moving would need
-      // the original anchor. Keep the history pointer untouched and explain.
-      setNotice({ tone: 'info', text: t('dock.structureUndoUnavailable') });
-      return;
-    }
-    var carrier = carrierRef.current;
-    if (!carrier) return;
-    var promise = applyInverse(op, direction);
-    Promise.resolve(promise).then(function () {
-      mutateTab(tabId, function (draft) {
-        var h = historyOf(draft);
-        draft.history = Object.assign({}, h, { index: direction === 'undo' ? h.index - 1 : h.index + 1, lastKey: '' });
-      });
-      var value = direction === 'undo' ? op.before : op.after;
-      queueRef.current.enqueue({
-        id: 'undo|' + op.id + '|' + Date.now(),
-        opId: op.id,
-        kind: op.kind,
-        selector: op.selector,
-        path: op.path,
-        property: op.property,
-        value: op.kind === 'style' ? value : undefined,
-        before: direction === 'undo' ? op.after : op.before,
-        after: value,
-        attrName: op.attrName,
-        sourceHints: op.sourceHints,
-        outerHTML: op.outerHTML,
-        textSnippet: op.textSnippet,
-      });
-      updateOperationStatus(tabId, [op.id], 'preview', '');
-      refreshSelection();
-    }).catch(function (error) {
-      setNotice({ tone: 'error', text: String(error && error.message ? error.message : error) });
-    });
+    return applyHistoryStep(
+      {
+        tab: tabRef.current,
+        carrier: carrierRef.current,
+        translate: t,
+        advance: function (dir) {
+          mutateTab(tabId, function (draft) {
+            var h = historyOf(draft);
+            draft.history = Object.assign({}, h, { index: dir === 'undo' ? h.index - 1 : h.index + 1, lastKey: '' });
+          });
+        },
+        enqueue: function (record) {
+          // Corrective writes are not history entries: give an unnamed record its
+          // own queue id so two quick undos never coalesce, and so the original
+          // op (which keeps `undone`) is not re-mapped by the corrective result.
+          queueRef.current.enqueue(record.opId === undefined ? Object.assign({}, record, { opId: record.id }) : record);
+        },
+        mark: function (op, status) {
+          updateOperationStatus(tabId, [op.id], status, '');
+        },
+        refresh: refreshSelection,
+        notice: function (tone, text) {
+          setNotice({ tone: tone, text: text });
+        },
+      },
+      direction,
+    );
   }
 
   // ----------------------------------------------------------- annotations
@@ -936,11 +1332,11 @@ function NudgeBody(props) {
       return;
     }
     if (action === 'dom') {
-      setDomOpen(function (open) { return !open; });
+      toggleDock('dom');
       return;
     }
     if (action === 'workspace') {
-      setWorkspaceOpen(function (open) { return !open; });
+      toggleDock('workspace');
     }
   }
 
@@ -1013,11 +1409,11 @@ function NudgeBody(props) {
       onExternal: external,
       domOpen: domOpen,
       onToggleDom: function () {
-        setDomOpen(!domOpen);
+        toggleDock('dom');
       },
       workspaceOpen: workspaceOpen,
       onToggleWorkspace: function () {
-        setWorkspaceOpen(!workspaceOpen);
+        toggleDock('workspace');
       },
       shortcuts: {
         platform: shortcutSnapshot.platform,
@@ -1045,8 +1441,13 @@ function NudgeBody(props) {
             style: {
               flex: 'none',
               padding: '5px 12px',
-              color: notice.tone === 'error' ? theme.danger : theme.muted,
-              background: notice.tone === 'error' ? 'color-mix(in srgb, ' + theme.danger + ' 10%, transparent)' : theme.layer1,
+              color: notice.tone === 'error' ? theme.danger : notice.tone === 'warning' ? theme.warn : theme.muted,
+              background:
+                notice.tone === 'error'
+                  ? 'color-mix(in srgb, ' + theme.danger + ' 10%, transparent)'
+                  : notice.tone === 'warning'
+                    ? 'color-mix(in srgb, ' + theme.warn + ' 12%, transparent)'
+                    : theme.layer1,
               font: 'var(--dsw-font-xxxs-11, 11px/1.4 sans-serif)',
               display: 'flex',
               alignItems: 'center',
@@ -1084,7 +1485,11 @@ function NudgeBody(props) {
       : null,
     React.createElement(
       'div',
-      { style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'row', background: theme.layer1 } },
+      {
+        ref: dockHostRef,
+        'data-dsh-nudge-dock-host': '',
+        style: { flex: 1, minHeight: 0, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'row', background: theme.layer1 },
+      },
       React.createElement(
         'div',
         { style: { flex: '1 1 auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' } },
@@ -1137,37 +1542,97 @@ function NudgeBody(props) {
           )
         : null,
       ),
-      domOpen && features.enableDomTree !== false
-        ? React.createElement(DomTreePanel, {
-            t: t,
-            theme: theme,
-            carrier: carrierRef.current,
-            selection: tab.selection,
-            onClose: function () {
-              setDomOpen(false);
+      dock !== 'none' &&
+      ((dock === 'dom' && features.enableDomTree !== false) ||
+        (dock === 'workspace' && features.enableWorkspaceVersions !== false))
+        ? React.createElement(
+            NudgeDock,
+            {
+              t: t,
+              theme: theme,
+              active: dock,
+              docked: !dockOverlay,
+              width: dockWidth,
+              overlayWidth: Math.max(
+                NUDGE_DOCK_MIN_WIDTH,
+                Math.min(320, (dockHostWidth > 0 ? dockHostWidth : 416) - 96),
+              ),
+              showDom: features.enableDomTree !== false,
+              showWorkspace: features.enableWorkspaceVersions !== false,
+              onTab: function (next) {
+                setDock(next);
+              },
+              onClose: function () {
+                setDock('none');
+              },
+              onResize: function (next) {
+                setDockWidth(next);
+              },
+              onResizeEnd: function (next) {
+                setDockWidth(next);
+                writeDockWidth(next);
+              },
+              onRefresh:
+                dock === 'workspace'
+                  ? function () {
+                      if (workspaceRefreshRef.current) workspaceRefreshRef.current();
+                    }
+                  : null,
             },
-          })
-        : null,
-      workspaceOpen && features.enableWorkspaceVersions !== false
-        ? React.createElement(NudgeWorkspacePanel, {
-            ctx: props.ctx,
-            t: t,
-            theme: theme,
-            sessionId: sessionId,
-            currentUrl: tab.url,
-            // A successful source write changes git state; let the panel reload
-            // its snapshot instead of waiting for a manual refresh.
-            refreshToken: tab.sync && tab.sync.status === 'done' && typeof tab.sync.at === 'number' ? tab.sync.at : 0,
-            onClose: function () {
-              setWorkspaceOpen(false);
-            },
-            onNotice: function (nextNotice) {
-              setNotice(nextNotice);
-            },
-            onNavigate: navigate,
-            onReload: reload,
-          })
+            dock === 'dom'
+              ? React.createElement(DomTreePanel, {
+                  t: t,
+                  theme: theme,
+                  carrier: carrierRef.current,
+                  selection: tab.selection,
+                  embedded: true,
+                  onClose: function () {
+                    setDock('none');
+                  },
+                })
+              : React.createElement(NudgeWorkspacePanel, {
+                  ctx: props.ctx,
+                  t: t,
+                  theme: theme,
+                  sessionId: sessionId,
+                  currentUrl: tab.url,
+                  embedded: true,
+                  refreshHandle: workspaceRefreshRef,
+                  // A successful source write changes git state; let the panel reload
+                  // its snapshot instead of waiting for a manual refresh.
+                  refreshToken:
+                    tab.sync && (tab.sync.status === 'done' || tab.sync.status === 'partial') && typeof tab.sync.at === 'number' ? tab.sync.at : 0,
+                  onClose: function () {
+                    setDock('none');
+                  },
+                  onNotice: function (nextNotice) {
+                    setNotice(nextNotice);
+                  },
+                  onNavigate: navigate,
+                  onReload: reload,
+                }),
+          )
         : null,
     ),
   );
+}
+
+// Engineering-test seam: the client factory only publishes `name`/`inject`/
+// `apply`; a harness that opts in via `__DSH_VI_TEST_HOOKS__` (same seam as the
+// theme bridge) can exercise the structure payload / replay / inverse rules
+// without a browser. Production exports stay untouched.
+if (typeof globalThis !== 'undefined' && globalThis.__DSH_VI_TEST_HOOKS__ === true) {
+  exports.__dshnudgeSyncInternals = {
+    buildRuntimeLocale: buildRuntimeLocale,
+    syncReasonText: syncReasonText,
+    replayableOperations: replayableOperations,
+    runtimeEditFor: runtimeEditFor,
+    applyInverse: applyInverse,
+    followUpOperation: followUpOperation,
+    applyHistoryStep: applyHistoryStep,
+    rememberHostCapabilities: rememberHostCapabilities,
+    hostHasCapability: hostHasCapability,
+    hostCapabilitySnapshot: hostCapabilitySnapshot,
+    defaultWorkspaceUrl: defaultWorkspaceUrl,
+  };
 }

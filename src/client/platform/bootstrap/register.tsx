@@ -312,11 +312,13 @@ function apply(ctx) {
   // Link (URL) context menu: open the linked page in the inspector, keeping
   // the URL the chat link already carries. The host menu is owned by
   // open-in-app; registering another target:'url' provider appends one action.
+  // Every surface that names the product uses the same mark: the tab chip, the
+  // browser chooser row, this link menu and the settings navigation.
   slots.inject('contextMenu.icon', function* () {
     yield slots.register(
       { name: 'contextMenu.icon', key: 'nudge.open' },
       function () {
-        return React.createElement(Icon.cursor, { size: 13 });
+        return React.createElement(Icon.nudge, { size: 13 });
       },
     );
   });
@@ -398,7 +400,7 @@ function apply(ctx) {
       },
       function (props) {
         var size = props && typeof props.size === 'number' ? props.size : 16;
-        return React.createElement(Icon.cursor, { size: size });
+        return React.createElement(Icon.nudge, { size: size });
       },
     );
   });

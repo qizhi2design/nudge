@@ -877,6 +877,324 @@ async function testMoveElementInMarkup() {
   })
 }
 
+
+// ------------------------------------- structure edits: fallback + safety
+
+/** A resolvable-but-wrong `data-source` hint must not swallow the edit. */
+async function testStructureFallsThroughWrongHint() {
+  await withWorkspace(async (root) => {
+    await writeAt(
+      root,
+      'demo/index.html',
+      '<!doctype html>\n<html>\n  <body>\n    <header id="top">\n      <button id="open-card" class="btn" type="button">New card</button>\n    </header>\n  </body>\n</html>\n',
+    )
+    await writeAt(root, 'demo/app.js', "var vehicle = { name: 'x' }\n")
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(
+        root,
+        adapter,
+        [
+          {
+            id: 'hint-miss-1',
+            kind: 'remove',
+            selector: '#open-card',
+            outerHTML: '<button id="open-card" class="btn" type="button">New card</button>',
+            textSnippet: 'New card',
+            textBefore: 'New card',
+            sourceHints: { file: 'demo/app.js', line: 18 },
+          },
+        ],
+        { page: { url: 'http://127.0.0.1:5173/demo/index.html' } },
+      ),
+    )
+    assertEqual(out.results[0].status, 'synced', 'routing: wrong hint falls through to the URL mapping')
+    assertEqual(out.results[0].file, 'demo/index.html', 'routing: the URL-mapped page is written')
+    const js = await readAt(root, 'demo/app.js')
+    assertEqual(js, "var vehicle = { name: 'x' }\n", 'routing: the hinted JS file is untouched')
+  })
+}
+
+/** An existing mapped file that lacks the element must not suppress search. */
+async function testStructureSearchAfterMappedFileMiss() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <div id="root"></div>\n  </body>\n</html>\n')
+    await writeAt(root, 'src/Panel.html', '<section class="panel">\n  <h2 class="panel-title">Settings</h2>\n</section>\n')
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'shell-1',
+          kind: 'remove',
+          selector: 'section.panel',
+          outerHTML: '<section class="panel"><h2 class="panel-title">Settings</h2></section>',
+          textSnippet: 'Settings',
+          textBefore: 'Settings',
+        },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'routing: mapped shell without the element falls through to search')
+    assertEqual(out.results[0].file, 'src/Panel.html', 'routing: searched component file is written')
+    const panel = await readAt(root, 'src/Panel.html')
+    assert(!panel.includes('section class="panel"'), 'routing: the searched file lost the removed element')
+  })
+}
+
+/** Structure edits never cut JS/JSX (no HTML tokenizer over component code). */
+async function testStructureRefusesJsSources() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <div id="root"></div>\n  </body>\n</html>\n')
+    const jsx = [
+      'export function Card(props) {',
+      '  return (',
+      '    <section className="card">',
+      '      <h2 className="title">Title</h2>',
+      '    </section>',
+      '  )',
+      '}',
+      '',
+    ].join('\n')
+    await writeAt(root, 'src/Card.jsx', jsx)
+    const adapter = createAdapter()
+    const removed = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'jsx-remove-1',
+          kind: 'remove',
+          selector: 'section.card',
+          outerHTML: '<section class="card"><h2 class="title">Title</h2></section>',
+          textSnippet: 'Title',
+          textBefore: 'Title',
+          sourceHints: { file: 'src/Card.jsx' },
+        },
+      ]),
+    )
+    assertEqual(removed.results[0].status, 'preview', 'jsx: structure edit on a .jsx source stays preview-only')
+    assertEqual(removed.results[0].reason, 'unsupported-js-source', 'jsx: reason names the JS source limit')
+    assertEqual(await readAt(root, 'src/Card.jsx'), jsx, 'jsx: the component file is byte-identical')
+
+    const text = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'jsx-text-1',
+          kind: 'text',
+          selector: 'h2.title',
+          outerHTML: '<h2 class="title">Title</h2>',
+          textBefore: 'Title',
+          textAfter: 'Renamed',
+          sourceHints: { file: 'src/Card.jsx' },
+        },
+      ]),
+    )
+    assertEqual(text.results[0].file, 'src/Card.jsx', 'jsx: text edits are still routed into the .jsx file')
+    assert(text.results[0].status !== 'failed', 'jsx: text edits are not blocked by the structure JS gate')
+  })
+}
+
+/** Structure edits locate through the pre-mutation text anchor. */
+async function testStructureLocatesByTextSnippet() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <div id="wrap">\n      <p class="note">Only appears once</p>\n    </div>\n  </body>\n</html>\n')
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        { id: 'snippet-1', kind: 'remove', selector: '.note', textSnippet: 'Only appears once' },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'text anchor: remove locates through textSnippet alone')
+    assert(!(await readAt(root, 'index.html')).includes('Only appears once'), 'text anchor: the element is gone')
+  })
+}
+
+/** A truncated outerHTML may never verify a stale DOM path by a text prefix. */
+async function testTruncatedOuterHtmlCannotVerifyStalePath() {
+  await withWorkspace(async (root) => {
+    const body =
+      '<!doctype html>\n<html>\n  <body>\n    <p class="x">Same opening words here</p>\n    <p class="x">Same opening words here</p>\n  </body>\n</html>\n'
+    await writeAt(root, 'index.html', body)
+    const adapter = createAdapter()
+    const stale = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'trunc-stale-1',
+          kind: 'remove',
+          selector: 'p.x',
+          path: [0, 0],
+          outerHTML: '<p class="y">Same opening words here</p>',
+          outerHTMLTruncated: true,
+          textSnippet: 'Same opening words here',
+        },
+      ]),
+    )
+    assertEqual(stale.results[0].status, 'preview', 'truncated: a stale path is not accepted for a truncated payload')
+    assertEqual(adapter.state.writes.length, 0, 'truncated: nothing is written when the path cannot be verified')
+    assertEqual(await readAt(root, 'index.html'), body, 'truncated: both paragraphs survive')
+
+    const good = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'trunc-good-1',
+          kind: 'remove',
+          selector: 'p.x',
+          path: [0, 0],
+          outerHTML: '<p class="x">Same opening words here</p>',
+          outerHTMLTruncated: true,
+          textSnippet: 'Same opening words here',
+        },
+      ]),
+    )
+    assertEqual(good.results[0].status, 'synced', 'truncated: a verified path still resolves the intended element')
+    const after = await readAt(root, 'index.html')
+    assertEqual(countOccurrences(after, '<p class="x">'), 1, 'truncated: exactly one paragraph removed')
+  })
+}
+
+/** Move uses the runtime DOM path when the destination has no usable selector. */
+async function testMoveUsesRuntimeDomPathFallback() {
+  await withWorkspace(async (root) => {
+    await writeAt(
+      root,
+      'index.html',
+      '<!doctype html>\n<html>\n  <body>\n    <div id="list">\n      <p id="a">A</p>\n      <div class="slot"></div>\n      <div class="slot"></div>\n    </div>\n  </body>\n</html>\n',
+    )
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'move-path-1',
+          kind: 'move',
+          selector: '#a',
+          outerHTML: '<p id="a">A</p>',
+          targetParentSelector: '',
+          targetParentPath: [0, 0, 2],
+          targetParentOuterHTML: '<div class="slot"></div>',
+          beforeSelector: null,
+        },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'move path: classless repeated destination resolved through the DOM path')
+    const content = await readAt(root, 'index.html')
+    assert(/<div class="slot">\s*<p id="a">A<\/p>\s*<\/div>\s*<\/div>/.test(content), 'move path: element became the last child of the second slot')
+  })
+}
+
+/** `insert` is the inverse of `remove` and must restore captured markup. */
+async function testInsertRestoresRemovedMarkup() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <div id="wrap">\n    </div>\n  </body>\n</html>\n')
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'insert-1',
+          kind: 'insert',
+          selector: '',
+          html: '<p id="back">Restored</p>',
+          targetParentSelector: '#wrap',
+          beforeSelector: null,
+        },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'insert: captured markup is written back')
+    assertEqual(out.results[0].strategy, 'html-insert', 'insert: strategy is html-insert')
+    const content = await readAt(root, 'index.html')
+    assert(content.includes('<p id="back">Restored</p>'), 'insert: markup present in the source')
+    assert(content.indexOf('<p id="back">') > content.indexOf('<div id="wrap">'), 'insert: markup lands inside the target parent')
+    assert(content.indexOf('<p id="back">') < content.lastIndexOf('</div>'), 'insert: markup stays before the parent close')
+  })
+}
+
+/** A server-issued handle addresses one element even when the selector is ambiguous. */
+async function testElementHandleDisambiguatesRepeatedMarkup() {
+  await withWorkspace(async (root) => {
+    await writeAt(
+      root,
+      'index.html',
+      '<!doctype html>\n<html>\n  <body>\n    <div id="left">\n      <span class="icon"></span>\n    </div>\n    <div id="right">\n      <span class="icon"></span>\n    </div>\n  </body>\n</html>\n',
+    )
+    const adapter = createAdapter()
+    const first = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'handle-1',
+          kind: 'attr',
+          selector: '#right > span.icon',
+          path: [0, 1, 0],
+          attrName: 'data-mark',
+          attrAfter: '1',
+        },
+      ]),
+    )
+    assertEqual(first.results[0].status, 'synced', 'handle: first edit lands (path anchored)')
+    const handle = first.results[0].handle
+    assert(handle && typeof handle.openStart === 'number' && typeof handle.openTagDigest === 'string', 'handle: result carries a handle')
+
+    const second = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'handle-2',
+          kind: 'remove',
+          selector: 'span.icon',
+          handle,
+        },
+      ]),
+    )
+    assertEqual(second.results[0].status, 'synced', 'handle: ambiguous selector resolves through the handle')
+    const content = await readAt(root, 'index.html')
+    assertEqual(countOccurrences(content, 'class="icon"'), 1, 'handle: exactly one icon remains')
+    assert(content.includes('<div id="left">\n      <span class="icon"></span>'), 'handle: the untouched icon is the first one')
+  })
+}
+
+/** Preview results carry the candidate files + reasons for the UI. */
+async function testPreviewCarriesCandidateDiagnostics() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <div id="root"></div>\n  </body>\n</html>\n')
+    await writeAt(root, 'hint.html', '<!doctype html>\n<html>\n  <body>\n    <div id="other"></div>\n  </body>\n</html>\n')
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'diag-1',
+          kind: 'remove',
+          selector: '.missing-thing',
+          textSnippet: 'missing thing',
+          sourceHints: { file: 'hint.html' },
+        },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'preview', 'diagnostics: unresolved structure edit stays preview-only')
+    assert(Array.isArray(out.results[0].candidates) && out.results[0].candidates.length >= 2, 'diagnostics: every probed candidate is reported')
+    const files = out.results[0].candidates.map((entry) => entry.file)
+    assert(files.includes('hint.html') && files.includes('index.html'), 'diagnostics: hinted and URL-mapped files are both listed')
+    assert(out.results[0].candidates.every((entry) => typeof entry.why === 'string' && entry.why !== ''), 'diagnostics: each candidate carries a reason')
+    assertEqual(adapter.state.writes.length, 0, 'diagnostics: nothing is written')
+  })
+}
+
+
+/** Undo-insert into a container addressed only by a cssPath (no id) resolves it. */
+async function testInsertResolvesClassOnlyParent() {
+  await withWorkspace(async (root) => {
+    await writeAt(root, 'index.html', '<!doctype html>\n<html>\n  <body>\n    <section class="card-top">\n    </section>\n  </body>\n</html>\n')
+    const adapter = createAdapter()
+    const out = await syncEdits(
+      makeDeps(root, adapter, [
+        {
+          id: 'insert-class-1',
+          kind: 'insert',
+          selector: '',
+          html: '<span class="badge">New</span>',
+          targetParentSelector: 'body > section.card-top',
+          beforeSelector: null,
+        },
+      ]),
+    )
+    assertEqual(out.results[0].status, 'synced', 'insert: class-only parent resolved by selector tokens')
+    assert((await readAt(root, 'index.html')).includes('<span class="badge">New</span>'), 'insert: snippet written into the class-marked parent')
+  })
+}
+
 // ----------------------------------------------------------------- runner
 
 const tests = [
@@ -905,6 +1223,16 @@ const tests = [
   ['text span across a source line break', testTextSpanAcrossSourceLineBreak],
   ['remove element (subtree) from markup', testRemoveElementFromMarkup],
   ['move element (reorder / re-parent) in markup', testMoveElementInMarkup],
+  ['structure: wrong hint falls through to URL mapping', testStructureFallsThroughWrongHint],
+  ['structure: mapped file miss falls through to search', testStructureSearchAfterMappedFileMiss],
+  ['structure: JS/JSX sources are refused, text edits still work', testStructureRefusesJsSources],
+  ['structure: locate by textSnippet anchor', testStructureLocatesByTextSnippet],
+  ['structure: truncated outerHTML cannot verify a stale path', testTruncatedOuterHtmlCannotVerifyStalePath],
+  ['structure: move destination resolved by DOM path', testMoveUsesRuntimeDomPathFallback],
+  ['structure: insert restores removed markup', testInsertRestoresRemovedMarkup],
+  ['structure: insert resolves a class-only parent', testInsertResolvesClassOnlyParent],
+  ['structure: element handle disambiguates repeated markup', testElementHandleDisambiguatesRepeatedMarkup],
+  ['structure: preview carries candidate diagnostics', testPreviewCarriesCandidateDiagnostics],
 ]
 
 let caseCount = 0

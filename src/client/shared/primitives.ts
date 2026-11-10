@@ -156,11 +156,15 @@ function ensureGlobalStyles() {
     '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact]{height:var(--dsh-nudge-float-compact-height,64px)!important;width:min(760px, calc(100% - 64px))!important;left:calc(50% - min(380px, calc(50% - 32px)))!important;border-radius:16px 16px 0 0!important}' +
     '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact] [data-conversation-scroll]{overflow:hidden!important}' +
     '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=compact] [data-conversation-scroll]>:not([data-composer-seat]){display:none!important}' +
-    // Controls: an icon inside the expanded dock collapses it to a small
-    // floating button; that button restores the expanded dock.
-    '[data-dsh-nudge-float-collapse]{position:fixed!important;z-index:55!important;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:.5px solid var(--dsw-alias-border-l3,#ddd);border-radius:8px;background:var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff));color:var(--dsw-alias-label-primary, #111);cursor:pointer;box-shadow:0 2px 8px #0002}' +
-    '[data-dsh-nudge-float-collapse]:hover{background:var(--dsw-alias-button-floating-hover, var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff)))}' +
-    '[data-dsh-nudge-float-collapse] svg{width:16px;height:16px}' +
+    // Controls: two separate 26px icons inside the dock's top-right corner —
+    // the chevron collapses the messages (compact composer dock), the bubble
+    // shrinks the whole dock to the small floating button. While compact the
+    // bubble alone floats above the input bar; the 46px circle restores the
+    // dock. They never share one button.
+    '[data-dsh-nudge-float-collapse],[data-dsh-nudge-float-shrink]{position:fixed!important;z-index:55!important;box-sizing:border-box;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:.5px solid var(--dsw-alias-border-l3,#ddd);border-radius:8px;background:var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff));color:var(--dsw-alias-label-primary, #111);cursor:pointer;box-shadow:0 2px 8px #0002}' +
+    '[data-dsh-nudge-float-collapse]:hover,[data-dsh-nudge-float-shrink]:hover{background:var(--dsw-alias-button-floating-hover, var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff)))}' +
+    '[data-dsh-nudge-float-collapse]:focus-visible,[data-dsh-nudge-float-shrink]:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary, #4f8cff);outline-offset:2px}' +
+    '[data-dsh-nudge-float-collapse] svg,[data-dsh-nudge-float-shrink] svg{width:16px;height:16px}' +
     // The restore button floats over the *inspected page*, which can be light
     // while the host theme is dark. Its hover fill must stay opaque: the generic
     // `--dsw-alias-interactive-bg-hover` token is a translucent tint (white 8%
@@ -171,8 +175,13 @@ function ensureGlobalStyles() {
     '[data-dsh-nudge-float-button]:hover{background-color:var(--dsw-alias-button-floating-hover, var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-base, #fff)))!important;border-color:var(--dsw-alias-border-l4, var(--dsw-alias-border-l3, #ddd))!important}' +
     '[data-dsh-nudge-float-button]:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary, #4f8cff);outline-offset:2px}' +
     '[data-dsh-nudge-float-button] svg{width:20px;height:20px}' +
-    '[data-dsh-nudge-float-collapse][hidden],[data-dsh-nudge-float-button][hidden]{display:none!important}' +
+    '[data-dsh-nudge-float-collapse][hidden],[data-dsh-nudge-float-shrink][hidden],[data-dsh-nudge-float-button][hidden]{display:none!important}' +
     '[data-dsh-nudge-floating-chat][data-dsh-nudge-float-mode=hidden]{display:none!important}' +
+    // The dock panel is narrow: filename owns the row width, the parent folder
+    // only appears on hover/focus (the row title still carries the full path).
+    '[data-dsh-nudge-workspace-panel] [data-workspace-file-dir]{display:none}' +
+    '[data-dsh-nudge-workspace-panel] [data-workspace-file]:hover [data-workspace-file-dir],' +
+    '[data-dsh-nudge-workspace-panel] [data-workspace-file]:focus-visible [data-workspace-file-dir]{display:inline}' +
     (typeof NUDGE_UI_CSS === 'string' ? NUDGE_UI_CSS : '');
   var existing = document.getElementById(GLOBAL_CSS_TAG);
   if (existing) {

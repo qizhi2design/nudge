@@ -148,9 +148,20 @@
 		scheduleFrame()
 		return !0
 	}
+	/**
+	 * True when the pointer currently rests on the inspector's own chrome (style
+	 * card, composer, bottom bar, pins, ...). The injected cursor and the page
+	 * hover chrome must step aside there: the panel is regular UI, so it keeps
+	 * the native cursor and no selection marker is painted over it.
+	 */
+	function pointerOverOwnUi() {
+		if (destroyed || !pointerSeen) return false
+		var node = elementAtPoint(pointerX, pointerY)
+		return !!node && isOwnNode(node)
+	}
 	function syncPointerCursor() {
 		if (!parts) return
-		var visible = (mode === 'annotate' || mode === 'edit') && !passthrough && !popover && pointerSeen && !(drag && drag.active)
+		var visible = (mode === 'annotate' || mode === 'edit') && !passthrough && !popover && pointerSeen && !(drag && drag.active) && !pointerOverOwnUi()
 		if (visible) {
 			ensureCursorStyle()
 			parts.cursor && parts.cursor.style.setProperty('display', 'block')

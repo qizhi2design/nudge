@@ -524,6 +524,14 @@ function createCarrier(options) {
       if (!runtimeReady) return Promise.resolve(null);
       return runtimeCommand('r.reapply(' + JSON.stringify(edits) + ')');
     },
+    applyInsert: function (spec) {
+      if (!runtimeReady) return Promise.resolve(null);
+      return runtimeCommand('r.applyInsert(' + JSON.stringify(spec) + ')');
+    },
+    applyMoveElement: function (spec) {
+      if (!runtimeReady) return Promise.resolve(null);
+      return runtimeCommand('r.applyMoveElement(' + JSON.stringify(spec) + ')');
+    },
     describe: function (selector) {
       if (!runtimeReady) return Promise.resolve(null);
       return runtimeJson('r.getDescriptor(' + JSON.stringify(selector) + ')');

@@ -28,6 +28,16 @@
  * bottom dock, not a window. Collapsing a tab or leaving fullscreen removes the
  * markers and the geometry variable again.
  *
+ * Controls are two independent affordances, not one merged button:
+ *
+ *   - `collapse` (chevron) collapses the messages back to the compact composer
+ *     dock. Only meaningful while expanded, so it only shows in that form.
+ *   - `shrink` (bubble) collapses the whole dock into the small floating
+ *     button. Shown while expanded (left of the chevron) and while compact
+ *     (floating above the input bar), so the escape stays reachable in both
+ *     forms.
+ *   - `button` (bubble) is the 46px floating button that restores the dock.
+ *
  * Scope decisions:
  *
  *   - Only a docked fullscreen Nudge tab triggers the surface. A floating pane,
@@ -48,6 +58,7 @@ var FLOATING_MODE_ATTR = 'data-dsh-nudge-float-mode'
 var FLOATING_HEIGHT_VAR = '--dsh-nudge-float-compact-height'
 var FLOATING_ANNOTATE_ATTR = 'data-dsh-nudge-float-annotate'
 var FLOATING_COLLAPSE_ATTR = 'data-dsh-nudge-float-collapse'
+var FLOATING_SHRINK_ATTR = 'data-dsh-nudge-float-shrink'
 var FLOATING_BUTTON_ATTR = 'data-dsh-nudge-float-button'
 var FLOATING_FOREIGN_ATTR = 'data-dsh-floating-chat'
 var FLOATING_POPUP_SELECTOR =
@@ -60,9 +71,17 @@ var FLOATING_POPUP_SELECTOR =
  * queued-messages dock or the composer card), instead of them sitting flush.
  */
 var FLOATING_COMPACT_TOP_GAP = 10
+/**
+ * The two dock-corner controls are 26px squares with 6px between them. Both
+ * live in the host layer above the dock, so their offsets are computed in
+ * pixels against the dock's own rect (see positionControls).
+ */
+var FLOATING_CONTROL_SIZE = 26
+var FLOATING_CONTROL_GAP = 6
 
 var FLOATING_DEFAULT_LABELS = Object.freeze({
-  collapse: 'Collapse to floating button',
+  collapse: 'Collapse messages',
+  shrink: 'Shrink to floating button',
   expand: 'Open chat',
 })
 var floatingLabels = FLOATING_DEFAULT_LABELS
@@ -297,7 +316,7 @@ function installFloatingComposer(doc) {
       button.setAttribute(FLOATING_COLLAPSE_ATTR, '')
       button.appendChild(createSvg(['M5 9l7 7 7-7'], 'v'))
     } else {
-      button.setAttribute(FLOATING_BUTTON_ATTR, '')
+      button.setAttribute(kind === 'shrink' ? FLOATING_SHRINK_ATTR : FLOATING_BUTTON_ATTR, '')
       button.appendChild(
         createSvg(
           ['M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3h.5a8.5 8.5 0 0 1 8 8z'],
@@ -872,14 +891,17 @@ function installFloatingComposer(doc) {
   }
 
   /**
-   * The collapse control lives in the host layer, above the dock, so the same
-   * "shrink to the floating button" affordance exists in both presentations:
-   * inside the expanded dock's top-right corner, or just above the compact
-   * input bar. Both shrink to the floating button.
+   * Both dock controls live in the host layer, above the dock, so each one has
+   * its own job and its own place:
+   *
+   *   - expanded: 收起 (chevron) sits inside the dock's top-right corner and
+   *     收缩为悬浮按钮 (bubble) sits one gap to its left, so the two actions
+   *     stay separated instead of sharing one merged button.
+   *   - compact:  nothing to collapse, so only the shrink bubble floats just
+   *     above the right end of the input bar.
    */
-  function positionCollapseButton() {
-    if (!active || !active.collapseButton) return
-    var button = active.collapseButton
+  function positionControls() {
+    if (!active) return
     var rect = null
     try {
       rect = active.chat.getBoundingClientRect ? active.chat.getBoundingClientRect() : null
@@ -897,12 +919,24 @@ function installFloatingComposer(doc) {
     }
     var right = 8
     if (rect && rect.right > 0 && viewWidth > 0) right = Math.max(8, Math.round(viewWidth - rect.right + 8))
-    button.style.left = 'auto'
-    button.style.right = right + 'px'
-    if (active.mode === 'expanded') {
-      var top = rect && rect.top > 0 ? Math.round(rect.top + 8) : 8
-      button.style.top = top + 'px'
-      button.style.bottom = 'auto'
+    var top = rect && rect.top > 0 ? Math.round(rect.top + 8) : 8
+    var expanded = active.mode === 'expanded'
+
+    var collapse = active.collapseButton
+    if (collapse) {
+      collapse.style.left = 'auto'
+      collapse.style.right = right + 'px'
+      collapse.style.top = top + 'px'
+      collapse.style.bottom = 'auto'
+    }
+
+    var shrink = active.shrinkButton
+    if (!shrink) return
+    shrink.style.left = 'auto'
+    if (expanded) {
+      shrink.style.right = right + FLOATING_CONTROL_SIZE + FLOATING_CONTROL_GAP + 'px'
+      shrink.style.top = top + 'px'
+      shrink.style.bottom = 'auto'
       return
     }
     var dockHeight = 0
@@ -910,15 +944,20 @@ function installFloatingComposer(doc) {
     else dockHeight = parseFloat(active.chat.style.getPropertyValue(FLOATING_HEIGHT_VAR)) || 0
     var fromBottom = dockHeight
     if (viewHeight > 0 && rect && rect.top > 0) fromBottom = viewHeight - rect.top
-    button.style.top = 'auto'
-    button.style.bottom = Math.max(8, Math.round(fromBottom) + 8) + 'px'
+    shrink.style.right = right + 'px'
+    shrink.style.top = 'auto'
+    shrink.style.bottom = Math.max(8, Math.round(fromBottom) + 8) + 'px'
   }
 
   function applyControls() {
     if (!active) return
-    if (active.collapseButton) active.collapseButton.hidden = active.mode === 'hidden'
+    // 收起 only makes sense with the messages open; the shrink control is the
+    // escape from both open forms, and the round button only exists while the
+    // dock itself is hidden.
+    if (active.collapseButton) active.collapseButton.hidden = active.mode !== 'expanded'
+    if (active.shrinkButton) active.shrinkButton.hidden = active.mode === 'hidden'
     if (active.floatButton) active.floatButton.hidden = active.mode !== 'hidden'
-    positionCollapseButton()
+    positionControls()
   }
 
   function setMode(mode) {
@@ -944,7 +983,7 @@ function installFloatingComposer(doc) {
     if (!(height > 0)) height = 56
     var compact = Math.max(52, Math.min(280, Math.round(height) + 4 + FLOATING_COMPACT_TOP_GAP))
     active.chat.style.setProperty(FLOATING_HEIGHT_VAR, compact + 'px')
-    positionCollapseButton()
+    positionControls()
     publishInset()
   }
 
@@ -984,16 +1023,16 @@ function installFloatingComposer(doc) {
 
   function activate(target) {
     var collapseButton = createControl('collapse', floatingLabels.collapse)
+    var shrinkButton = createControl('shrink', floatingLabels.shrink)
     var floatButton = createControl('float', floatingLabels.expand)
-    try {
-      ;(doc.body || target.frame || target.chat).appendChild(collapseButton)
-    } catch (error) {
-      /* no body yet; the control stays detached until the next activation */
-    }
-    try {
-      ;(doc.body || target.frame || target.chat).appendChild(floatButton)
-    } catch (error) {
-      /* no body yet; the button stays detached until the next activation */
+    var host = doc.body || target.frame || target.chat
+    var mounted = [collapseButton, shrinkButton, floatButton]
+    for (var mountedIndex = 0; mountedIndex < mounted.length; mountedIndex += 1) {
+      try {
+        host.appendChild(mounted[mountedIndex])
+      } catch (error) {
+        /* no body yet; the control stays detached until the next activation */
+      }
     }
     active = {
       chat: target.chat,
@@ -1001,9 +1040,11 @@ function installFloatingComposer(doc) {
       panel: target.panel,
       mode: 'compact',
       collapseButton: collapseButton,
+      shrinkButton: shrinkButton,
       floatButton: floatButton,
     }
-    collapseButton.addEventListener('click', onCollapseToButton)
+    collapseButton.addEventListener('click', onCollapseMessages)
+    shrinkButton.addEventListener('click', onShrinkToButton)
     floatButton.addEventListener('click', onExpandFromButton)
     target.chat.setAttribute(FLOATING_CHAT_ATTR, '')
     target.chat.setAttribute(FLOATING_MODE_ATTR, 'compact')
@@ -1021,7 +1062,13 @@ function installFloatingComposer(doc) {
     refreshAnnotationBar()
   }
 
-  function onCollapseToButton() {
+  /** 收起: put the messages away, keep the input bar (compact dock). */
+  function onCollapseMessages() {
+    setMode('compact')
+  }
+
+  /** 收缩为悬浮按钮: hide the whole dock and leave the round button behind. */
+  function onShrinkToButton() {
     setMode('hidden')
   }
 
@@ -1032,12 +1079,13 @@ function installFloatingComposer(doc) {
   function removeControls() {
     if (!active) return
     clearAnnotationDiscard()
-    var controls = [active.collapseButton, active.floatButton, active.annotationBar ? active.annotationBar.root : null]
+    var controls = [active.collapseButton, active.shrinkButton, active.floatButton, active.annotationBar ? active.annotationBar.root : null]
     for (var index = 0; index < controls.length; index += 1) {
       var node = controls[index]
       if (!node) continue
       try {
-        node.removeEventListener('click', onCollapseToButton)
+        node.removeEventListener('click', onCollapseMessages)
+        node.removeEventListener('click', onShrinkToButton)
         node.removeEventListener('click', onExpandFromButton)
       } catch (error) {
         /* no listeners left */
@@ -1122,7 +1170,7 @@ function installFloatingComposer(doc) {
   function onPointerDown(event) {
     if (!active) return
     var target = event.target
-    if (target !== null && typeof target.closest === 'function' && target.closest('[' + FLOATING_COLLAPSE_ATTR + '], [' + FLOATING_BUTTON_ATTR + '], [' + FLOATING_ANNOTATION_BAR_ATTR + ']')) return
+    if (target !== null && typeof target.closest === 'function' && target.closest('[' + FLOATING_COLLAPSE_ATTR + '], [' + FLOATING_SHRINK_ATTR + '], [' + FLOATING_BUTTON_ATTR + '], [' + FLOATING_ANNOTATION_BAR_ATTR + ']')) return
     var inside = target !== null && typeof active.chat.contains === 'function' && active.chat.contains(target)
     if (active.mode === 'hidden') return
     if (active.mode === 'compact') {
@@ -1185,6 +1233,10 @@ function installFloatingComposer(doc) {
       if (active.collapseButton) {
         active.collapseButton.setAttribute('aria-label', floatingLabels.collapse)
         active.collapseButton.setAttribute('title', floatingLabels.collapse)
+      }
+      if (active.shrinkButton) {
+        active.shrinkButton.setAttribute('aria-label', floatingLabels.shrink)
+        active.shrinkButton.setAttribute('title', floatingLabels.shrink)
       }
       if (active.floatButton) {
         active.floatButton.setAttribute('aria-label', floatingLabels.expand)
@@ -1283,6 +1335,7 @@ function setFloatingComposerLabels(labels) {
   var next = Object.assign({}, FLOATING_DEFAULT_LABELS)
   if (labels && typeof labels === 'object') {
     if (typeof labels.collapse === 'string' && labels.collapse !== '') next.collapse = labels.collapse
+    if (typeof labels.shrink === 'string' && labels.shrink !== '') next.shrink = labels.shrink
     if (typeof labels.expand === 'string' && labels.expand !== '') next.expand = labels.expand
   }
   floatingLabels = next

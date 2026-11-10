@@ -6,7 +6,7 @@
  */
 
 import { URL_ATTRIBUTES, VOID_ELEMENTS } from '../constants.js'
-import { locateElement, locateElementDetailed } from '../html/locate.js'
+import { locateElement, locateElementDetailed, locateBySelectorTokens } from '../html/locate.js'
 import { tokenizeHtml, textNodeRanges } from '../html/tokenizer.js'
 import { escapeRegExp } from '../shared/paths.js'
 import { diffText, decodeEntities, decodeEntitiesWithMap, escapeHtmlText, escapeAttributeValue, stripMarkup, normalizeWhitespaceText, compactText } from '../shared/text.js'
@@ -378,8 +378,12 @@ export function applyMarkupMoveEdit(content, edit) {
     selector: typeof edit.targetParentSelector === 'string' ? edit.targetParentSelector : '',
     outerHTML: typeof edit.targetParentOuterHTML === 'string' ? edit.targetParentOuterHTML : '',
     textBefore: typeof edit.targetParentTextBefore === 'string' ? edit.targetParentTextBefore : '',
+    path: Array.isArray(edit.targetParentPath) && edit.targetParentPath.length > 0 ? edit.targetParentPath : undefined,
   }
-  const parentRange = locateElement(content, parentSpec)
+  let parentRange = locateElement(content, parentSpec)
+  if (!parentRange && parentSpec.selector) {
+    parentRange = locateBySelectorTokens(content, tokenizeHtml(content).tags, parentSpec.selector)
+  }
   if (!parentRange) return { ok: false, reason: 'unresolved-target-parent' }
   const parentTag = parentRange.tag && parentRange.tag.name ? parentRange.tag.name : ''
   if (parentTag === 'html') return { ok: false, reason: 'protected-element' }
@@ -401,8 +405,10 @@ export function applyMarkupMoveEdit(content, edit) {
       selector: beforeSelector,
       outerHTML: typeof edit.beforeOuterHTML === 'string' ? edit.beforeOuterHTML : '',
       textBefore: typeof edit.beforeTextBefore === 'string' ? edit.beforeTextBefore : '',
+      path: Array.isArray(edit.beforePath) && edit.beforePath.length > 0 ? edit.beforePath : undefined,
     }
     anchorRange = locateElement(content, anchorSpec)
+    if (!anchorRange) anchorRange = locateBySelectorTokens(content, tags, beforeSelector)
     if (!anchorRange) return { ok: false, reason: 'unresolved-target-anchor' }
     anchorIndex = anchorRange.tagIndex
     if (anchorIndex === sourceIndex) return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
@@ -464,4 +470,121 @@ export function applyMarkupMoveEdit(content, edit) {
   const next = cut.content.slice(0, mapped) + insertionText + cut.content.slice(mapped)
   if (next === content) return { ok: true, content, changed: false, lineIndex: sourceRange.openStart }
   return { ok: true, content: next, changed: true, lineIndex: Math.min(cut.lineIndex, mapped) }
+}
+
+/**
+ * Insert a captured markup snippet inside one markup file.
+ *
+ * This is the inverse of `applyMarkupRemoveEdit`: the client replays the exact
+ * `outerHTML` that was removed, anchored on the recorded parent + next sibling.
+ * The snippet is re-indented to the destination line so the file keeps the
+ * author's formatting; nothing else is touched.
+ */
+export function applyMarkupInsertEdit(content, edit) {
+  const html = typeof edit.html === 'string' ? edit.html.trim() : ''
+  if (html === '') return { ok: false, reason: 'invalid-edit' }
+
+  const parentSpec = {
+    selector: typeof edit.targetParentSelector === 'string' ? edit.targetParentSelector : '',
+    outerHTML: typeof edit.targetParentOuterHTML === 'string' ? edit.targetParentOuterHTML : '',
+    textBefore: typeof edit.targetParentTextBefore === 'string' ? edit.targetParentTextBefore : '',
+    path: Array.isArray(edit.targetParentPath) && edit.targetParentPath.length > 0 ? edit.targetParentPath : undefined,
+  }
+  let parentRange = locateElement(content, parentSpec)
+  if (!parentRange && parentSpec.selector) {
+    parentRange = locateBySelectorTokens(content, tokenizeHtml(content).tags, parentSpec.selector)
+  }
+  if (!parentRange) return { ok: false, reason: 'unresolved-target-parent' }
+  const parentTag = parentRange.tag && parentRange.tag.name ? parentRange.tag.name : ''
+  if (parentTag === 'html' || parentTag === 'head') return { ok: false, reason: 'protected-element' }
+  if (STRUCTURE_UNSUPPORTED_PARENT_TAGS.has(parentTag)) return { ok: false, reason: 'unsupported-target-parent' }
+  if (typeof parentRange.closeStart !== 'number') return { ok: false, reason: 'unsupported-target-parent' }
+
+  const { tags } = tokenizeHtml(content)
+  const parents = elementParentIndexes(tags)
+  const parentIndex = parentRange.tagIndex
+
+  const beforeSelector = typeof edit.beforeSelector === 'string' ? edit.beforeSelector.trim() : ''
+  const beforePath = Array.isArray(edit.beforePath) && edit.beforePath.length > 0 ? edit.beforePath : undefined
+  let anchorRange = null
+  if (beforeSelector !== '' || beforePath !== undefined) {
+    anchorRange = locateElement(content, {
+      selector: beforeSelector,
+      outerHTML: typeof edit.beforeOuterHTML === 'string' ? edit.beforeOuterHTML : '',
+      textBefore: typeof edit.beforeTextBefore === 'string' ? edit.beforeTextBefore : '',
+      path: beforePath,
+    })
+    if (!anchorRange && beforeSelector !== '') {
+      anchorRange = locateBySelectorTokens(content, tags, beforeSelector)
+    }
+    if (!anchorRange) return { ok: false, reason: 'unresolved-target-anchor' }
+    if (anchorRange.tagIndex === parentIndex) return { ok: false, reason: 'invalid-move-target' }
+    if (parents[anchorRange.tagIndex] !== parentIndex) return { ok: false, reason: 'invalid-move-target' }
+  }
+
+  const snippet = stripSnippetIndent(html)
+  const sourceIndent = ''
+
+  let destIndent = ''
+  let insertAt = 0
+  let insertionText = ''
+  if (anchorRange) {
+    destIndent = indentAt(content, anchorRange.openStart)
+    const anchorLineStart = lineStartAt(content, anchorRange.openStart)
+    const anchorLinePrefix = content.slice(anchorLineStart, anchorRange.openStart)
+    const reindented = reindentSnippet(snippet, sourceIndent, destIndent)
+    if (/^[ \t]*$/.test(anchorLinePrefix)) {
+      insertAt = anchorLineStart
+      insertionText = destIndent + reindented + '\n'
+    } else {
+      insertAt = anchorRange.openStart
+      insertionText = reindented
+    }
+  } else {
+    let firstChild = -1
+    for (let cursor = 0; cursor < tags.length; cursor += 1) {
+      if (parents[cursor] !== parentIndex) continue
+      if (tags[cursor].closing) continue
+      firstChild = cursor
+      break
+    }
+    const closeLineStart = lineStartAt(content, parentRange.closeStart)
+    const closeIndent = indentAt(content, parentRange.closeStart)
+    const closeLinePrefix = content.slice(closeLineStart, parentRange.closeStart)
+    destIndent = firstChild >= 0 ? indentAt(content, tags[firstChild].start) : closeIndent + '  '
+    const reindented = reindentSnippet(snippet, sourceIndent, destIndent)
+    if (/^[ \t]*$/.test(closeLinePrefix)) {
+      insertAt = closeLineStart
+      insertionText = destIndent + reindented + '\n'
+    } else {
+      insertAt = parentRange.closeStart
+      insertionText = reindented
+    }
+  }
+
+  const next = content.slice(0, insertAt) + insertionText + content.slice(insertAt)
+  if (next === content) return { ok: true, content, changed: false, lineIndex: insertAt }
+  return { ok: true, content: next, changed: true, lineIndex: insertAt }
+}
+
+/** Drop the common leading indentation of a captured snippet. */
+function stripSnippetIndent(html) {
+  const lines = String(html).replace(/\r\n?/g, '\n').split('\n')
+  while (lines.length > 0 && lines[0].trim() === '') lines.shift()
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+  let prefix = null
+  for (const line of lines) {
+    if (line.trim() === '') continue
+    const indent = /^[ \t]*/.exec(line)[0]
+    prefix = prefix === null ? indent : commonPrefix(prefix, indent)
+    if (prefix === '') break
+  }
+  const head = prefix === null ? '' : prefix
+  return lines.map((line) => (line.startsWith(head) ? line.slice(head.length) : line)).join('\n')
+}
+
+function commonPrefix(left, right) {
+  let index = 0
+  while (index < left.length && index < right.length && left[index] === right[index]) index += 1
+  return left.slice(0, index)
 }

@@ -165,6 +165,34 @@ class FakeTextNode {
   }
 }
 
+class FakeDocumentFragment {
+  constructor(document) {
+    this.nodeType = 11
+    this.ownerDocument = document
+    this.parentNode = null
+    this.childNodes = []
+  }
+  get children() {
+    return this.childNodes.filter((node) => node.nodeType === 1)
+  }
+  appendChild(node) {
+    if (!node) return node
+    if (node.parentNode) node.parentNode.removeChild(node)
+    node.parentNode = this
+    this.childNodes.push(node)
+    return node
+  }
+  removeChild(node) {
+    const index = this.childNodes.indexOf(node)
+    if (index !== -1) this.childNodes.splice(index, 1)
+    node.parentNode = null
+    return node
+  }
+  get textContent() {
+    return this.childNodes.map((node) => node.textContent || '').join('')
+  }
+}
+
 class FakeEvent {
   constructor(type, init) {
     const options = init || {}
@@ -661,6 +689,80 @@ class FakeElement {
   }
 }
 
+const VOID_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr',
+])
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
+
+function decodeEntities(text) {
+  return String(text).replace(/&(#[xX]?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, name) => {
+    const key = String(name).toLowerCase()
+    if (key.charAt(0) === '#') {
+      const code = key.charAt(1) === 'x' ? parseInt(key.slice(2), 16) : parseInt(key.slice(1), 10)
+      return isFinite(code) ? String.fromCharCode(code) : match
+    }
+    return Object.prototype.hasOwnProperty.call(HTML_ENTITIES, key) ? HTML_ENTITIES[key] : match
+  })
+}
+
+/**
+ * Minimal inert HTML fragment parser backing `<template>.innerHTML` in the shim:
+ * enough for tag/attribute/text/void-element markup used by insert tests.
+ */
+function parseHTMLFragment(html, document) {
+  const tokens = String(html).match(/<!--[\s\S]*?-->|<![^>]*>|<[^>]*>|[^<]+/g) || []
+  const roots = []
+  const stack = []
+  const push = (node) => {
+    const parent = stack[stack.length - 1]
+    if (parent) parent.appendChild(node)
+    else roots.push(node)
+  }
+  for (const token of tokens) {
+    if (token.startsWith('<!--') || token.startsWith('<!')) continue
+    if (token.startsWith('</')) {
+      const name = token.slice(2, -1).trim().toLowerCase()
+      while (stack.length > 0) {
+        if (stack.pop().localName === name) break
+      }
+      continue
+    }
+    if (token.startsWith('<')) {
+      const selfClosing = /\/>$/.test(token)
+      const inner = token.slice(1, selfClosing ? -2 : -1)
+      const tagMatch = /^([a-zA-Z][\w-]*)/.exec(inner)
+      if (!tagMatch) continue
+      const node = new FakeElement(tagMatch[1].toLowerCase(), document)
+      const attributes = inner.slice(tagMatch[0].length)
+      const attributePattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g
+      let match
+      while ((match = attributePattern.exec(attributes))) {
+        const value = match[2] !== undefined ? match[2] : match[3] !== undefined ? match[3] : match[4] !== undefined ? match[4] : ''
+        node.setAttribute(match[1], decodeEntities(value))
+      }
+      push(node)
+      if (!selfClosing && !VOID_TAGS.has(node.localName)) stack.push(node)
+      continue
+    }
+    push(new FakeTextNode(decodeEntities(token)))
+  }
+  return roots
+}
+
+class FakeTemplateElement extends FakeElement {
+  constructor(tag, document) {
+    super(tag, document)
+    this.content = new FakeDocumentFragment(document)
+  }
+  get innerHTML() {
+    return this.content.childNodes.map((node) => (node.nodeType === 1 ? node.outerHTML : node.textContent)).join('')
+  }
+  set innerHTML(value) {
+    for (const node of this.content.childNodes.slice()) this.content.removeChild(node)
+    for (const node of parseHTMLFragment(value, this.ownerDocument)) this.content.appendChild(node)
+  }
+}
+
 class FakeDocument {
   constructor() {
     eventTargetMixin(this)
@@ -680,7 +782,8 @@ class FakeDocument {
     this.__all = [this.documentElement, head, body]
   }
   createElement(tag) {
-    const element = new FakeElement(tag, this)
+    const name = String(tag).toLowerCase()
+    const element = name === 'template' ? new FakeTemplateElement(name, this) : new FakeElement(name, this)
     this.__all.push(element)
     return element
   }
@@ -960,7 +1063,7 @@ async function run() {
   const methods = [
     'setMode', 'setSelection', 'clearSelection', 'setSelectionByPath', 'getDescriptor',
     'getAncestry', 'drainEvents', 'getState', 'applyStyle', 'applyText', 'applyAttr',
-    'reapply', 'setLocale', 'setTheme', 'setBottomInset', 'setBarHosted', 'getBarState',
+    'reapply', 'applyInsert', 'applyMoveElement', 'setLocale', 'setTheme', 'setBottomInset', 'setBarHosted', 'getBarState',
     'toggleMarkers', 'discardAnnotations', 'sendAnnotations', 'exitAnnotate', 'locateLastAnnotation', 'locate', 'openAnnotationEditor',
     'updateAnnotation', 'removeAnnotation', 'reinit', 'destroy',
   ]
@@ -1310,6 +1413,119 @@ async function run() {
   eq('design card delete removed the element', dragTwo.parentNode, null)
   eq('design card closes after delete', document.querySelector('[data-dsh-nudge="design"]'), null)
   eq('mode restored after structure tests', runtime.setMode('browse'), true)
+  flushEvents(runtime)
+
+  section('structure anchors (Anchor v1.5)')
+  runtime.setMode('edit')
+  const anchorHost = element('div', { id: 'anchor-host', parent: document.body })
+  const anchorOne = element('p', { id: 'anchor-one', text: 'first card', parent: anchorHost })
+  const anchorTwo = element('p', { id: 'anchor-two', text: 'second card', parent: anchorHost })
+  const anchorThree = element('p', { id: 'anchor-three', text: 'third card', parent: anchorHost })
+  const altHost = element('div', { id: 'alt-host', parent: document.body })
+  // Away from (0,0,100,40), the shim's default rect, so elementFromPoint cannot
+  // pick an overlay part or another default-sized element instead of this one.
+  const altChild = element('em', { id: 'alt-child', text: 'alt', parent: altHost, rect: { x: 300, y: 10, width: 20, height: 20 } })
+  flushEvents(runtime)
+
+  runtime.setSelection('#anchor-one')
+  dispatch(document.body, new FakeEvent('keydown', { target: document.body, key: 'Delete' }))
+  const anchorRemoveEvent = flushEvents(runtime).find((event) => event.type === 'design-structure' && event.op === 'remove')
+  ok('anchor remove payload queued', !!anchorRemoveEvent)
+  eq('anchor remove textBefore is untruncated', anchorRemoveEvent && anchorRemoveEvent.textBefore, 'first card')
+  eq('anchor remove keeps the legacy textSnippet', anchorRemoveEvent && anchorRemoveEvent.textSnippet, 'first card')
+  eq('anchor remove outerHTMLTruncated flag', anchorRemoveEvent && anchorRemoveEvent.outerHTMLTruncated, false)
+  eq('anchor remove outerHTML has no ellipsis', anchorRemoveEvent && anchorRemoveEvent.outerHTML, '<p id="anchor-one">first card</p>')
+  ok('anchor remove elementKey shape', !!anchorRemoveEvent && /^el_\d+$/.test(anchorRemoveEvent.elementKey), anchorRemoveEvent && anchorRemoveEvent.elementKey)
+  eq('anchor remove parentSelector', anchorRemoveEvent && anchorRemoveEvent.parentSelector, '#anchor-host')
+  eq('anchor remove beforeSelector', anchorRemoveEvent && anchorRemoveEvent.beforeSelector, '#anchor-two')
+
+  const hugeAnchor = element('div', { id: 'huge-anchor', text: 'x'.repeat(70000), parent: document.body })
+  runtime.setSelection('#huge-anchor')
+  dispatch(document.body, new FakeEvent('keydown', { target: document.body, key: 'Delete' }))
+  const hugeEvent = flushEvents(runtime).find((event) => event.type === 'design-structure' && event.op === 'remove')
+  ok('huge remove payload queued', !!hugeEvent)
+  eq('huge remove outerHTMLTruncated flag', hugeEvent && hugeEvent.outerHTMLTruncated, true)
+  eq('huge remove outerHTML is capped at 64KiB', hugeEvent && hugeEvent.outerHTML.length, 65536)
+  ok('huge remove outerHTML has no ellipsis', !!hugeEvent && hugeEvent.outerHTML.indexOf('\u2026') === -1)
+  eq('huge remove textBefore is capped at 2048', hugeEvent && hugeEvent.textBefore.length, 2048)
+  eq('huge remove keeps the legacy textSnippet cap', hugeEvent && hugeEvent.textSnippet.length, 300)
+
+  dispatch(anchorTwo, new FakeEvent('mousedown', { target: anchorTwo, clientX: 5, clientY: 5 }))
+  dispatch(anchorTwo, new FakeEvent('mousemove', { target: anchorTwo, clientX: 305, clientY: 15 }))
+  flushFrames()
+  dispatch(document.body, new FakeEvent('mouseup', { target: document.body }))
+  const anchorMoveEvent = flushEvents(runtime).find((event) => event.type === 'design-structure' && event.op === 'move')
+  ok('anchor move payload queued', !!anchorMoveEvent)
+  eq('anchor move textBefore', anchorMoveEvent && anchorMoveEvent.textBefore, 'second card')
+  eq('anchor move outerHTMLTruncated flag', anchorMoveEvent && anchorMoveEvent.outerHTMLTruncated, false)
+  ok('anchor move elementKey shape', !!anchorMoveEvent && /^el_\d+$/.test(anchorMoveEvent.elementKey), anchorMoveEvent && anchorMoveEvent.elementKey)
+  eq('anchor move fromParentSelector is the original parent', anchorMoveEvent && anchorMoveEvent.fromParentSelector, '#anchor-host')
+  eq('anchor move fromBeforeSelector is the original next sibling', anchorMoveEvent && anchorMoveEvent.fromBeforeSelector, '#anchor-three')
+  eq('anchor move target parent', anchorMoveEvent && anchorMoveEvent.targetParentSelector, '#alt-host')
+  eq('anchor move anchor selector', anchorMoveEvent && anchorMoveEvent.beforeSelector, '#alt-child')
+  deepEq(
+    'anchor move re-parented the element before the anchor',
+    altHost.children.map((child) => child.id),
+    ['anchor-two', 'alt-child'],
+  )
+
+  const moveBackResult = runtime.applyMoveElement({ elementKey: anchorMoveEvent && anchorMoveEvent.elementKey, parentSelector: '#anchor-host', beforeSelector: '#anchor-three' })
+  eq('applyMoveElement ok', moveBackResult.ok, true)
+  eq('applyMoveElement returns the current selector', moveBackResult.selector, '#anchor-two')
+  eq('applyMoveElement re-parented the element', anchorTwo.parentNode, anchorHost)
+  deepEq(
+    'applyMoveElement restored the sibling order',
+    anchorHost.children.map((child) => child.id),
+    ['anchor-two', 'anchor-three'],
+  )
+
+  const insertHost = element('div', { id: 'insert-host', parent: document.body })
+  element('span', { id: 'insert-anchor', text: 'anchor', parent: insertHost })
+  const insertResult = runtime.applyInsert({ parentSelector: '#insert-host', beforeSelector: '#insert-anchor', html: '<b id="inserted-node">new</b>' })
+  eq('applyInsert ok', insertResult.ok, true)
+  eq('applyInsert returns the inserted selector', insertResult.selector, '#inserted-node')
+  deepEq(
+    'applyInsert inserted before the anchor',
+    insertHost.children.map((child) => child.id),
+    ['inserted-node', 'insert-anchor'],
+  )
+  const appendInsertResult = runtime.applyInsert({ targetParentSelector: '#insert-host', beforeSelector: '#not-a-child', html: '<i id="appended-node">tail</i>' })
+  eq('applyInsert accepts targetParentSelector and appends a stale anchor', appendInsertResult.ok, true)
+  deepEq(
+    'applyInsert appends when the anchor is not a child',
+    insertHost.children.map((child) => child.id),
+    ['inserted-node', 'insert-anchor', 'appended-node'],
+  )
+
+  section('structure API refusals')
+  const unknownInsert = runtime.applyInsert({ parentSelector: '#does-not-exist', html: '<span>x</span>' })
+  eq('applyInsert unknown parent ok', unknownInsert.ok, false)
+  eq('applyInsert unknown parent reason', unknownInsert.reason, 'not-found')
+  const unknownMove = runtime.applyMoveElement({ elementKey: 'el_999999', parentSelector: '#insert-host' })
+  eq('applyMoveElement unknown key ok', unknownMove.ok, false)
+  eq('applyMoveElement unknown key reason', unknownMove.reason, 'not-found')
+  const protectedInsert = runtime.applyInsert({ parentSelector: 'head', html: '<span>x</span>' })
+  eq('applyInsert protected parent ok', protectedInsert.ok, false)
+  eq('applyInsert protected parent reason', protectedInsert.reason, 'protected-element')
+  const protectedMove = runtime.applyMoveElement({ elementKey: anchorMoveEvent && anchorMoveEvent.elementKey, parentSelector: 'head' })
+  eq('applyMoveElement protected target ok', protectedMove.ok, false)
+  eq('applyMoveElement protected target reason', protectedMove.reason, 'protected-element')
+  const unsupportedInsert = runtime.applyInsert({ parentSelector: '#script', html: '<span>x</span>' })
+  eq('applyInsert unsupported parent reason', unsupportedInsert.reason, 'unsupported-target-parent')
+  const unsupportedMove = runtime.applyMoveElement({ elementKey: anchorMoveEvent && anchorMoveEvent.elementKey, parentSelector: '#script' })
+  eq('applyMoveElement unsupported target reason', unsupportedMove.reason, 'unsupported-target-parent')
+  ok('overlay root present for the own-node refusal', !!document.querySelector('[data-dsh-nudge-root]'))
+  const ownInsert = runtime.applyInsert({ parentSelector: '[data-dsh-nudge-root]', html: '<span>x</span>' })
+  eq('applyInsert own overlay node ok', ownInsert.ok, false)
+  ok('applyInsert own overlay node reason', typeof ownInsert.reason === 'string' && ownInsert.reason.length > 0, ownInsert && ownInsert.reason)
+  const ownMove = runtime.applyMoveElement({ elementKey: anchorMoveEvent && anchorMoveEvent.elementKey, parentSelector: '[data-dsh-nudge-root]' })
+  eq('applyMoveElement own overlay node ok', ownMove.ok, false)
+  ok('applyMoveElement own overlay node reason', typeof ownMove.reason === 'string' && ownMove.reason.length > 0, ownMove && ownMove.reason)
+  const nullInsert = runtime.applyInsert(null)
+  eq('applyInsert null spec does not throw', nullInsert.ok, false)
+  const nullMove = runtime.applyMoveElement(null)
+  eq('applyMoveElement null spec does not throw', nullMove.ok, false)
+  eq('mode restored after anchor tests', runtime.setMode('browse'), true)
 
   section('selection-lost event')
   runtime.setSelection('#destroyable')
@@ -1506,6 +1722,21 @@ async function run() {
   ok('space does not pass through while the design card is open', designRoot.getAttribute('data-dsh-nudge-passthrough') !== 'true')
   dispatch(textEditor, new FakeEvent('keydown', { target: textEditor, key: ' ', code: 'Space' }))
   ok('space stays an input character inside the design card', designRoot.getAttribute('data-dsh-nudge-passthrough') !== 'true')
+  // The injected cursor / page hover chrome must step aside on our own panel:
+  // the style card is regular UI, so it keeps the native cursor and no selection
+  // marker / metadata is painted over it.
+  const cursorNode = designRoot.querySelector('[data-dsh-nudge="cursor"]')
+  const hoverChrome = designRoot.querySelector('[data-dsh-nudge="hover"]')
+  const metaChrome = designRoot.querySelector('[data-dsh-nudge="meta"]')
+  eq('overlay chrome restores the native cursor', designRoot.style.getPropertyValue('cursor'), 'auto')
+  dispatch(document, new FakeEvent('mousemove', { target: textEditor, clientX: 20, clientY: 20 }))
+  flushFrames()
+  eq('injected cursor hides while the pointer is on the panel', cursorNode.style.getPropertyValue('display'), 'none')
+  eq('page hover chrome hides while the pointer is on the panel', hoverChrome.style.getPropertyValue('display'), 'none')
+  eq('page metadata hides while the pointer is on the panel', metaChrome.style.getPropertyValue('display'), 'none')
+  dispatch(document, new FakeEvent('mousemove', { target: button, clientX: 500, clientY: 500 }))
+  flushFrames()
+  eq('injected cursor returns once the pointer is back on the page', cursorNode.style.getPropertyValue('display'), 'block')
   dispatch(document, new FakeEvent('keydown', { target: document, key: 'Escape' }))
   eq('escape closes design card', designRoot.querySelector('[data-dsh-nudge="design"]'), null)
   eq('cancel reverts the text edit', button.textContent, '按钮')
@@ -1723,6 +1954,12 @@ async function run() {
   eq('listeners removed after destroy', listenerCount(document), 0)
   eq('window listeners removed after destroy', listenerCount(sandbox), 0)
   eq('theme media listener released after destroy', themeMedia.listenerCount(), 0)
+  const destroyedInsert = runtime2.applyInsert({ parentSelector: 'body', html: '<span>x</span>' })
+  eq('applyInsert after destroy ok', destroyedInsert.ok, false)
+  eq('applyInsert after destroy reason', destroyedInsert.reason, 'destroyed')
+  const destroyedMove = runtime2.applyMoveElement({ elementKey: 'el_1', parentSelector: 'body' })
+  eq('applyMoveElement after destroy ok', destroyedMove.ok, false)
+  eq('applyMoveElement after destroy reason', destroyedMove.reason, 'destroyed')
 
   process.stdout.write('\n' + checks + ' checks, ' + failures + ' failure(s)\n')
   if (failures > 0) {

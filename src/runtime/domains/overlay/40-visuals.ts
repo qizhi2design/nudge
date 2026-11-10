@@ -192,7 +192,7 @@
 	}
 	function updateMeta() {
 		if (!parts || !parts.meta) return
-		var visible = hoverEl && mode !== 'browse' && !passthrough && !popover && !(drag && drag.active) && isConnected(hoverEl)
+		var visible = hoverEl && mode !== 'browse' && !passthrough && !popover && !(drag && drag.active) && !pointerOverOwnUi() && isConnected(hoverEl)
 		if (!visible) {
 			hidePart(parts.meta)
 			return
@@ -320,7 +320,7 @@
 				positionPart(parts.selection, rectOf(selectionEl), annotationAccentColor(), 2)
 				setStyle(parts.selection, 'border-radius', radiusOf(selectionEl))
 			} else hidePart(parts.selection)
-			if (hoverEl && mode !== 'browse' && !popover && !passthrough && isConnected(hoverEl)) {
+			if (hoverEl && mode !== 'browse' && !popover && !passthrough && !pointerOverOwnUi() && isConnected(hoverEl)) {
 				positionPart(parts.hover, rectOf(hoverEl), annotationAccentColor(), 2)
 				setStyle(parts.hover, 'border-radius', radiusOf(hoverEl))
 			} else hidePart(parts.hover)

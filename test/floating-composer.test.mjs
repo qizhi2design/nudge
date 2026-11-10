@@ -456,19 +456,37 @@ assert(
   setFloatingAnnotationBarHandlers(null)
 
   const collapseButton = surface.doc.body.querySelector('[data-dsh-nudge-float-collapse]')
+  const shrinkButton = surface.doc.body.querySelector('[data-dsh-nudge-float-shrink]')
   const floatButton = surface.doc.body.querySelector('[data-dsh-nudge-float-button]')
-  assert(collapseButton !== null, 'the dock carries a collapse control')
+  assert(collapseButton !== null, 'the dock carries a collapse-messages control')
+  assert(shrinkButton !== null, 'the dock carries a separate shrink-to-floating-button control')
   assert(floatButton !== null, 'a floating restore button is mounted')
-  assert(collapseButton.hidden === false && floatButton.hidden === true, 'the compact input shows a collapse-to-float control')
-  assert(collapseButton.style.top === 'auto' && String(collapseButton.style.bottom || '') !== '', 'the compact collapse control floats above the input bar')
+  assert(collapseButton !== shrinkButton && collapseButton !== floatButton, 'the three controls are distinct buttons')
+  assert(
+    collapseButton.hidden === true && shrinkButton.hidden === false && floatButton.hidden === true,
+    'the compact input shows only the shrink control (nothing to collapse)',
+  )
+  assert(shrinkButton.style.top === 'auto' && String(shrinkButton.style.bottom || '') !== '', 'the compact shrink control floats above the input bar')
   assert(surface.panel.style.getPropertyValue('bottom') === '', 'compact browsing leaves the page full height')
-  setFloatingComposerLabels({ collapse: '收缩为悬浮按钮', expand: '展开对话' })
+  setFloatingComposerLabels({ collapse: '收起消息区', shrink: '收缩为悬浮按钮', expand: '展开对话' })
+  assert(collapseButton.getAttribute('aria-label') === '收起消息区', 'localised labels reach the collapse control')
+  assert(shrinkButton.getAttribute('aria-label') === '收缩为悬浮按钮', 'localised labels reach the shrink control')
   assert(floatButton.getAttribute('aria-label') === '展开对话', 'localised labels reach the floating button')
 
   surface.doc.dispatch('pointerdown', { target: surface.seat })
   assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'expanded', 'pressing the composer opens the messages')
-  assert(collapseButton.hidden === false && floatButton.hidden === true, 'the collapse control stays visible with the messages')
+  assert(
+    collapseButton.hidden === false && shrinkButton.hidden === false && floatButton.hidden === true,
+    'the expanded dock shows the collapse and shrink controls side by side',
+  )
   assert(collapseButton.style.bottom === 'auto' && String(collapseButton.style.top || '') !== '', 'the expanded collapse control sits inside the dock corner')
+  const collapseRight = Number(String(collapseButton.style.right || '').replace('px', '')) || 0
+  const shrinkRight = Number(String(shrinkButton.style.right || '').replace('px', '')) || 0
+  assert(
+    shrinkRight === collapseRight + 26 + 6,
+    'the two expanded controls are separate buttons, not one merged control',
+    'collapse right=' + collapseRight + ' shrink right=' + shrinkRight,
+  )
 
   // Annotate mode starts compact, but the composer still expands: focusing the
   // input opens the history, and the page panel never shrinks.
@@ -491,11 +509,30 @@ assert(
   assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'expanded', 'the composer opens the messages again after annotating')
   assert(floatingComposerInset() === 0, 'an expanded dock no longer reserves the bottom strip')
   collapseButton.fire('click', {})
-  assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'hidden', 'the collapse control shrinks the dock to the floating button')
+  assert(
+    surface.center.getAttribute('data-dsh-nudge-float-mode') === 'compact',
+    'the collapse control puts the messages away and keeps the input bar',
+  )
+  assert(floatingComposerInset() === 62, 'the collapsed dock publishes its height as the page safe area again')
+  assert(
+    collapseButton.hidden === true && shrinkButton.hidden === false && floatButton.hidden === true,
+    'only the shrink control remains above the collapsed input bar',
+  )
+  surface.doc.dispatch('pointerdown', { target: surface.seat })
+  assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'expanded', 'pressing the composer opens the messages again')
+  shrinkButton.fire('click', {})
+  assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'hidden', 'the shrink control collapses the dock to the floating button')
   assert(floatingComposerInset() === 0, 'a hidden dock reserves nothing')
-  assert(collapseButton.hidden === true && floatButton.hidden === false, 'the floating button replaces the dock')
+  assert(
+    collapseButton.hidden === true && shrinkButton.hidden === true && floatButton.hidden === false,
+    'the floating button replaces the dock',
+  )
   floatButton.fire('click', {})
   assert(surface.center.getAttribute('data-dsh-nudge-float-mode') === 'expanded', 'the floating button restores the messages')
+  assert(
+    collapseButton.hidden === false && shrinkButton.hidden === false,
+    'both dock controls return with the messages',
+  )
 
   // The page is an Electron guest / iframe: pointer events never reach this
   // document, but focus moving into it does.
@@ -520,6 +557,7 @@ assert(
   assert(!surface.center.hasAttribute('data-dsh-nudge-float-mode'), 'leaving fullscreen removes the mode marker')
   assert(surface.center.style.getPropertyValue('--dsh-nudge-float-compact-height') === '', 'leaving fullscreen clears the height variable')
   assert(surface.doc.body.querySelector('[data-dsh-nudge-float-collapse]') === null, 'leaving fullscreen removes the collapse control')
+  assert(surface.doc.body.querySelector('[data-dsh-nudge-float-shrink]') === null, 'leaving fullscreen removes the shrink control')
   assert(surface.doc.body.querySelector('[data-dsh-nudge-float-annotbar]') === null, 'leaving fullscreen removes the host annotate bar')
   assert(floatingComposerInset() === 0, 'leaving fullscreen clears the published page safe area')
   unsubscribeInset()

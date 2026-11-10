@@ -770,6 +770,24 @@
 		return !0
 	}
 
+	var STRUCTURE_KEY_SEQ = 0,
+		STRUCTURE_KEY_OF = new WeakMap(),
+		STRUCTURE_KEY_BY_KEY = new Map()
+	/**
+	 * Stable runtime identity for one element, used instead of a DOM attribute so
+	 * the page and its source stay untouched. The WeakMap key keeps the mapping
+	 * alive only while the element is; the reverse Map is what `elementByKey`
+	 * reads when the host asks the runtime to move an element it anchored earlier.
+	 */
+	function keyForElement(element) {
+		if (!element || element.nodeType !== 1) return ''
+		var key = STRUCTURE_KEY_OF.get(element)
+		if (key) return key
+		STRUCTURE_KEY_SEQ += 1
+		key = 'el_' + STRUCTURE_KEY_SEQ
+		;(STRUCTURE_KEY_OF.set(element, key), STRUCTURE_KEY_BY_KEY.set(key, element))
+		return key
+	}
 	function structureOuterHTMLOf(element) {
 		var html = ''
 		try {
@@ -779,12 +797,28 @@
 		}
 		return html.length > 4000 ? html.slice(0, 3999) + '\u2026' : html
 	}
+	/**
+	 * Anchor v1.5 payload: `textBefore` is the untruncated locating text,
+	 * `outerHTML` is capped at 64KiB and flagged instead of ellipsized so the
+	 * host can tell a complete marker from a cut one, and `elementKey` is a
+	 * runtime-only identity the host can hand back for later structural edits.
+	 */
 	function structurePayloadOf(element) {
+		var html = ''
+		try {
+			html = element && element.outerHTML !== void 0 ? String(element.outerHTML) : ''
+		} catch {
+			html = ''
+		}
+		var truncated = html.length > 65536
 		return {
 			selector: cssPath(element),
 			path: pathOf(element),
-			outerHTML: structureOuterHTMLOf(element),
+			outerHTML: truncated ? html.slice(0, 65536) : html,
+			outerHTMLTruncated: truncated,
 			textSnippet: visibleTextOf(element),
+			textBefore: visibleTextOf(element, 2048),
+			elementKey: keyForElement(element),
 			sourceHints: sourceHintsOf(element)
 		}
 	}
@@ -799,11 +833,26 @@
 	function structureRemove(element) {
 		if (destroyed || !element || element.nodeType !== 1 || isOwnNode(element) || !isConnected(element)) return !1
 		var payload = structurePayloadOf(element)
+		var parentSelector = element.parentElement ? cssPath(element.parentElement) : ''
+		var fromSibling = element.nextElementSibling || null
+		var beforeSelector = fromSibling ? cssPath(fromSibling) : null
 		var outcome = applyRemoveTo(element)
 		if (!outcome || !outcome.ok) return !1
 		;((selectionEl = null), (selectionSelector = ''), (hoverEl = null))
 		designCard && closeDesignCard(!1)
-		queueEvent('design-structure', { op: 'remove', selector: payload.selector, path: payload.path, outerHTML: payload.outerHTML, textSnippet: payload.textSnippet, sourceHints: payload.sourceHints })
+		queueEvent('design-structure', {
+			op: 'remove',
+			selector: payload.selector,
+			path: payload.path,
+			outerHTML: payload.outerHTML,
+			outerHTMLTruncated: payload.outerHTMLTruncated,
+			textSnippet: payload.textSnippet,
+			textBefore: payload.textBefore,
+			elementKey: payload.elementKey,
+			parentSelector: parentSelector,
+			beforeSelector: beforeSelector,
+			sourceHints: payload.sourceHints
+		})
 		queueEvent('selection-lost', {})
 		updateVisuals()
 		scheduleFrame()
@@ -819,6 +868,11 @@
 		var payload = structurePayloadOf(element),
 			parentPayload = structurePayloadOf(parent),
 			beforePayload = before ? structurePayloadOf(before) : null
+		// Capture where the element came from before the DOM mutation, otherwise the
+		// inverse move (undo) has no trustworthy origin.
+		var fromParentSelector = element.parentElement ? cssPath(element.parentElement) : '',
+			fromSibling = element.nextElementSibling || null,
+			fromBeforeSelector = fromSibling ? cssPath(fromSibling) : null
 		var outcome = applyMoveTo(element, parent, before || null)
 		if (!outcome || !outcome.ok) return !1
 		queueEvent('design-structure', {
@@ -826,7 +880,10 @@
 			selector: payload.selector,
 			path: payload.path,
 			outerHTML: payload.outerHTML,
+			outerHTMLTruncated: payload.outerHTMLTruncated,
 			textSnippet: payload.textSnippet,
+			textBefore: payload.textBefore,
+			elementKey: payload.elementKey,
 			sourceHints: payload.sourceHints,
 			targetParentSelector: parentPayload.selector,
 			targetParentPath: parentPayload.path,
@@ -835,7 +892,9 @@
 			beforeSelector: beforePayload ? beforePayload.selector : null,
 			beforePath: beforePayload ? beforePayload.path : null,
 			beforeOuterHTML: beforePayload ? beforePayload.outerHTML : null,
-			beforeTextBefore: beforePayload ? beforePayload.textSnippet : null
+			beforeTextBefore: beforePayload ? beforePayload.textSnippet : null,
+			fromParentSelector: fromParentSelector,
+			fromBeforeSelector: fromBeforeSelector
 		})
 		selectElement(element, !0)
 		designCard && positionDesignCard()
