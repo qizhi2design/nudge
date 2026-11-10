@@ -22,7 +22,7 @@
     "panelShow": "Show style panel",
     "panelHide": "Hide style panel",
     "external": "Open in system browser",
-    "dom": "DOM tree"
+    "dom": "Page structure"
   },
   "mode": {
     "browseHint": "Browse: the page behaves normally. Switch to Annotate or Edit to start inspecting elements.",
@@ -35,7 +35,7 @@
     "resize": "Resize panel",
     "style": "Style",
     "content": "Content",
-    "dom": "DOM",
+    "dom": "Structure",
     "annotations": "Notes",
     "pageInfo": "Page",
     "noSelection": "No element selected",
@@ -166,23 +166,16 @@
   "shortcut": {
     "open": "Open Nudge",
     "noSession": "Open a session first",
-    "annotate": "Nudge: enter / exit annotate mode",
-    "edit": "Nudge: enter / exit edit mode",
-    "domTree": "Nudge: toggle DOM tree",
+    "domTree": "Nudge: toggle page structure",
     "workspace": "Nudge: toggle workspace versions",
     "holdSpace": "Nudge: hold Space to use the page",
     "featureOff": "This feature is turned off in Nudge settings",
-    "help": "Keyboard shortcuts",
-    "helpTitle": "Nudge shortcuts",
-    "helpHint": "Change them in DSH keyboard shortcuts",
-    "unbound": "Not set",
-    "pageLocal": "On the page",
     "hintAnnotate": "Click anywhere to add a note; drag to select a region",
     "hintEdit": "Click an element to adjust its styles",
     "hintSwitchAnnotation": "Switch annotation",
-    "hintToggleOff": "Press again to exit",
     "exitMode": "Exit annotate / edit mode",
-    "switchMode": "Switch between annotate and edit",
+    "enterAnnotate": "Enter annotate mode",
+    "enterEdit": "Enter edit mode",
     "prevAnnotation": "Previous annotation",
     "nextAnnotation": "Next annotation",
     "hintSpaceBefore": "Hold",
@@ -233,7 +226,10 @@
     "activateInspectorHint": "Annotate elements, tune styles live, hand it to the AI"
   },
   "link": {
-    "openInspector": "Open in Nudge"
+    "openInspector": "Open in Nudge",
+    "openBadge": "Nudge",
+    "openWith": "Open with",
+    "openInBrowser": "Open in browser"
   },
   "clip": {
     "annotations": "{n} notes",
@@ -249,12 +245,12 @@
     "emptyNote": "(no note)"
   },
   "dom": {
-    "title": "DOM tree",
+    "title": "Page structure",
     "expand": "Expand",
     "collapse": "Collapse",
-    "close": "Close DOM tree",
+    "close": "Close page structure",
     "loading": "Loading…",
-    "failed": "Could not load the DOM tree"
+    "failed": "Could not load the page structure"
   },
   "workspace": {
     "title": "Workspace versions",
@@ -302,7 +298,8 @@
     "restoreCancel": "Cancel",
     "restoreHint": "Restore {file} to its content at {commit}",
     "restored": "Restored {file} to {commit}",
-    "restoreFailed": "Could not restore the version: {message}"
+    "restoreFailed": "Could not restore the version: {message}",
+    "openInNudge": "Open in Nudge"
   },
   "commit": {
     "title": "Commit changes",
@@ -342,7 +339,7 @@
     "productIntro": "Product preferences for Nudge. Changes apply as soon as you save.",
     "sectionGeneral": "General",
     "language": "Plugin language",
-    "languageHint": "Follow DSH uses the app language; choosing 中文 / English only switches Nudge’s own interface text.",
+    "languageHint": "Follow DSH uses the app language; picking one only changes Nudge’s own UI text.",
     "languageAuto": "Follow DSH",
     "languageZh": "中文",
     "languageEn": "English",
@@ -351,8 +348,8 @@
     "featureAnnotateHint": "Hide the Annotate toggle; a page that is annotating returns to Browse.",
     "featureEdit": "Edit mode",
     "featureEditHint": "Hide the Edit toggle that opens live style and text editing.",
-    "featureDomTree": "DOM tree",
-    "featureDomTreeHint": "Show the DOM tree entry next to the page.",
+    "featureDomTree": "Page structure",
+    "featureDomTreeHint": "Show the page structure (element hierarchy) entry next to the page.",
     "featureWorkspaceVersions": "Workspace versions",
     "featureWorkspaceVersionsHint": "Show the workspace files, history and commit panel entry.",
     "featureHotReload": "Auto page reload",
@@ -396,7 +393,14 @@
     "readOnly": "This environment does not allow saving settings here; the values below are the current active ones and are read-only.",
     "reloadHint": "If the plugin was just updated, restart the app (or turn Nudge off and on in settings).",
     "featureFloatingComposer": "Floating chat box in fullscreen",
-    "featureFloatingComposerHint": "Keep the chat box floating above the right panel while Nudge is fullscreen, so you can annotate and message at the same time."
+    "featureFloatingComposerHint": "Keep the chat box floating above the right panel while Nudge is fullscreen, so you can annotate and message at the same time.",
+    "sectionShortcuts": "Keyboard shortcuts",
+    "hotkeyHint": "Single keys only fire inside the inspected page and never while typing in a field; changes apply immediately.",
+    "hotkeyFixedHint": "Fixed key, cannot be changed",
+    "hotkeyRecording": "Press a key… (Esc to cancel)",
+    "hotkeyConflict": "This key is already used by another shortcut",
+    "hotkeyReset": "Reset shortcut keys",
+    "hotkeyScopeHint": "\"Open Nudge / Page structure / Workspace versions\" are app-level commands; change them in DSH Settings → Keyboard shortcuts."
   },
   "floating": {
     "collapse": "Collapse messages",

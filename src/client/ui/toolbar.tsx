@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   GitBranch,
   Globe2,
-  Keyboard,
   ListTree,
   MessageSquarePlus,
   Redo2,
@@ -17,12 +16,7 @@ import {
 import { Button } from './components/button'
 import { Tooltip, TooltipProvider } from './components/tooltip'
 import { type ShortcutBinding, type ShortcutPlatform } from './components/kbd'
-import {
-  ModeHintContent,
-  ShortcutSheet,
-  type ModeHotkeyMap,
-  type ShortcutSheetRow,
-} from './components/shortcut-sheet'
+import { ModeHintContent, type ModeHotkeyMap } from './components/mode-hint'
 import { toolbarLayout, type ToolbarLayout } from './layout'
 
 export type InspectorMode = 'browse' | 'annotate' | 'edit'
@@ -80,13 +74,12 @@ export interface InspectorToolbarProps {
   reloadPending?: boolean
   onToggleHotReload?: () => void
   /**
-   * Effective shortcut bindings (from the DSH shortcut catalog) so tooltips,
-   * the shortcut sheet and the mode hint show what the system will dispatch.
+   * Effective app-level shortcut bindings (from the DSH shortcut catalog) so
+   * tooltips show what the system will dispatch.
    */
   shortcuts?: {
     platform: ShortcutPlatform
     bindings: Record<string, ShortcutBinding | null>
-    rows: ShortcutSheetRow[]
   }
   features?: {
     annotate?: boolean
@@ -518,7 +511,6 @@ export function InspectorToolbar({
   const [draft, setDraft] = React.useState<string | null>(null)
   const [layout, setLayout] = React.useState<ToolbarLayout>(INITIAL_LAYOUT)
   const [addressFocused, setAddressFocused] = React.useState(false)
-  const [sheetOpen, setSheetOpen] = React.useState(false)
   const shortcutPlatform: ShortcutPlatform = shortcuts ? shortcuts.platform : 'linux'
   const shortcutFor = React.useCallback(
     (id: string): ShortcutBinding | null => (shortcuts && shortcuts.bindings ? shortcuts.bindings[id] ?? null : null),
@@ -537,18 +529,6 @@ export function InspectorToolbar({
   const hotReloadEnabled = enabled.hotReload !== false
   const modesEnabled = annotateEnabled || editEnabled
   const panelsEnabled = domEnabled || workspaceEnabled || hotReloadEnabled
-
-  React.useEffect(() => {
-    if (!sheetOpen) return undefined
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      setSheetOpen(false)
-    }
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [sheetOpen])
 
   React.useEffect(() => {
     const node = rootRef.current
@@ -604,14 +584,7 @@ export function InspectorToolbar({
           theme={theme}
           icon={<MessageSquarePlus size={13} />}
           compact={layout.compact}
-          content={
-            <ModeHintContent
-              t={t}
-              mode="annotate"
-              platform={shortcutPlatform}
-              binding={shortcutFor('nudge.annotate.toggle')}
-            />
-          }
+          content={<ModeHintContent t={t} mode="annotate" platform={shortcutPlatform} hotkeys={hotkeys} />}
           onClick={() => toggleMode('annotate')}
         />
       ) : null}
@@ -623,14 +596,7 @@ export function InspectorToolbar({
           theme={theme}
           icon={<SlidersHorizontal size={13} />}
           compact={layout.compact}
-          content={
-            <ModeHintContent
-              t={t}
-              mode="edit"
-              platform={shortcutPlatform}
-              binding={shortcutFor('nudge.edit.toggle')}
-            />
-          }
+          content={<ModeHintContent t={t} mode="edit" platform={shortcutPlatform} hotkeys={hotkeys} />}
           onClick={() => toggleMode('edit')}
         />
       ) : null}
@@ -676,8 +642,8 @@ export function InspectorToolbar({
         />
       ) : null}
       {/* Wide panes balance the row: view/panel switches stay on the left,
-          history + external + shortcut help anchor the right edge. Narrow
-          panes keep every control visible (the row scrolls horizontally). */}
+          history + external anchor the right edge. Narrow panes keep every
+          control visible (the row scrolls horizontally). */}
       <span style={{ flex: '1 1 auto', minWidth: 4 }} />
       <Divider theme={theme} />
       <IconAction theme={theme} label={t('toolbar.undo')} disabled={!canUndo} onClick={onUndo}>
@@ -694,26 +660,8 @@ export function InspectorToolbar({
           </IconAction>
         </>
       ) : null}
-      <IconAction
-        theme={theme}
-        label={t('shortcut.help')}
-        active={sheetOpen}
-        ariaExpanded={sheetOpen}
-        onClick={() => setSheetOpen(!sheetOpen)}
-      >
-        <Keyboard size={14} />
-      </IconAction>
     </div>
   )
-
-  const shortcutSheet = sheetOpen && shortcuts ? (
-    <ShortcutSheet
-      t={t}
-      theme={theme}
-      platform={shortcuts.platform}
-      rows={shortcuts.rows}
-    />
-  ) : null
 
   return (
     <TooltipProvider theme={theme}>
@@ -838,7 +786,6 @@ export function InspectorToolbar({
           </form>
         </div>
         {actionRow}
-        {shortcutSheet}
       </div>
     </TooltipProvider>
   )

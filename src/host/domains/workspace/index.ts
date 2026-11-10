@@ -20,6 +20,7 @@
  * No top-level side effects.
  */
 
+import { isAbsolute, relative, sep } from 'node:path'
 import { scanHtmlFiles } from './files.js'
 import {
   gitCommit,
@@ -42,6 +43,20 @@ const DEFAULT_MAX_SCAN_FILES = 400
  *   resolveSourceRoot: (session: any, cwd: string) => Promise<{root: string}>,
  * }} deps
  */
+/**
+ * Map an absolute file path under the source root to its `/`-separated relative
+ * spelling. Relative input is passed through untouched so existing callers keep
+ * the preview service's own validation and error messages.
+ */
+function normalizePreviewFile(root, file) {
+  if (typeof file !== 'string' || file.trim() === '' || !isAbsolute(file)) return file
+  const rel = relative(root, file)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error('file ' + JSON.stringify(file) + ' is outside the session source root')
+  }
+  return rel.split(sep).join('/')
+}
+
 export function createWorkspaceDomain(deps) {
   const config = deps.config && typeof deps.config === 'object' ? deps.config : {}
   const maxScanFiles =
@@ -121,10 +136,16 @@ export function createWorkspaceDomain(deps) {
       return gitCommit(context, message, files)
     },
 
-    /** §3.6 — start or reuse the static server for this sourceRoot. */
+    /**
+     * §3.6 — start or reuse the static server for this sourceRoot.
+     *
+     * Chat file mentions resolve to absolute paths; the preview service serves
+     * source-root-relative paths. Accept both spellings and let the preview
+     * service keep its traversal guard.
+     */
     async previewOpen(sessionId, file) {
       const context = await contextFor(sessionId)
-      return preview.open(context.sourceRoot, file)
+      return preview.open(context.sourceRoot, normalizePreviewFile(context.sourceRoot, file))
     },
 
     /** §3.7 — stop the static server and watcher for this sourceRoot. */

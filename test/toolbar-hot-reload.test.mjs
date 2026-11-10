@@ -145,9 +145,9 @@ includes(on, 'border-color:color-mix(in srgb, #4176e6 36%, transparent)', 'selec
 assert(!on.includes('data-hot-reload-pending'), 'no pending marker while the page is current')
 
 // -------------------------------------------------- responsive panel labels
-includes(on, '>DOM 树</span>', 'wide toolbar labels the DOM panel entry')
+includes(on, '>页面结构</span>', 'wide toolbar labels the page-structure panel entry')
 includes(on, '>工作区版本</span>', 'wide toolbar labels the workspace panel entry')
-includes(on, 'aria-label="DOM 树"', 'DOM panel entry keeps its accessible name')
+includes(on, 'aria-label="页面结构"', 'page-structure panel entry keeps its accessible name')
 includes(on, 'aria-label="工作区版本"', 'workspace panel entry keeps its accessible name')
 includes(on, 'aria-pressed="false"', 'closed panel entries expose their pressed state')
 assert((on.match(/width:auto/g) || []).length >= 2, 'labeled panel entries override the fixed 28px icon width')

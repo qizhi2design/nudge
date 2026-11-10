@@ -628,6 +628,21 @@ try {
   assertEqual(previewReuse.url, preview.baseUrl, 'previewOpen: omitted file returns the base URL')
   assertEqual(previewReuse.file, '', 'previewOpen: omitted file reports an empty file field')
 
+  const absolutePreview = await api.previewOpen('session-1', root + '/demo/index.html')
+  assertEqual(absolutePreview.ok, true, 'previewOpen: accepts an absolute path under the source root')
+  assertEqual(absolutePreview.file, 'demo/index.html', 'previewOpen: absolute path normalizes to the relative spelling')
+  let outsidePreviewError = ''
+  try {
+    await api.previewOpen('session-1', '/etc/passwd')
+  } catch (error) {
+    outsidePreviewError = String(error && error.message ? error.message : error)
+  }
+  assert(
+    outsidePreviewError.includes('outside the session source root'),
+    'previewOpen: refuses absolute paths outside the source root',
+    outsidePreviewError,
+  )
+
   const previewSnapshot = await api.workspace('session-1')
   assertEqual(previewSnapshot.preview.active, true, 'workspace: preview reports active after previewOpen')
   assertEqual(previewSnapshot.preview.port, preview.port, 'workspace: preview reports the port')

@@ -6,7 +6,7 @@
 
 - **Pin notes right onto the page**: switch to Annotate, click an element, drag a region or select text, then write what you want changed. Each note becomes a numbered dot that stays out of your way.
 - **Edit live**: switch to Edit and tune text, colors, spacing, layout, radius, shadows and more in a floating card. The page updates immediately, with undo / redo.
-- **See every layer**: open the DOM tree (the page element hierarchy) next to the page. Click a layer to select it, including dialogs and dynamically inserted content.
+- **See every layer**: open the page structure (the element hierarchy) next to the page. Click a layer to select it, including dialogs and dynamically inserted content.
 - **Undo mistakes safely**: Workspace versions lets you browse files, switch branches, restore a previous version and commit selected files.
 - **Never reload by hand**: when a workspace file changes, the page refreshes automatically.
 

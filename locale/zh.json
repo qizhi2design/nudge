@@ -22,7 +22,7 @@
     "panelShow": "显示样式面板",
     "panelHide": "隐藏样式面板",
     "external": "在系统浏览器中打开",
-    "dom": "DOM 树"
+    "dom": "页面结构"
   },
   "mode": {
     "browseHint": "浏览模式：页面保持正常交互。切到标注或编辑模式，就能开始检查页面元素。",
@@ -35,7 +35,7 @@
     "resize": "拖拽调整面板宽度",
     "style": "样式",
     "content": "内容",
-    "dom": "DOM",
+    "dom": "结构",
     "annotations": "批注",
     "pageInfo": "页面",
     "noSelection": "还没选中元素",
@@ -166,23 +166,16 @@
   "shortcut": {
     "open": "打开轻推",
     "noSession": "请先打开一个会话",
-    "annotate": "轻推：进入 / 退出标注模式",
-    "edit": "轻推：进入 / 退出编辑模式",
-    "domTree": "轻推：切换 DOM 树",
+    "domTree": "轻推：切换页面结构",
     "workspace": "轻推：切换工作区版本",
     "holdSpace": "轻推：按住空格键临时操作网页",
     "featureOff": "该功能已在轻推设置中关闭",
-    "help": "键盘快捷键",
-    "helpTitle": "轻推快捷键",
-    "helpHint": "可在 DSH 的快捷键面板里修改",
-    "unbound": "未设置",
-    "pageLocal": "页面内",
     "hintAnnotate": "点一下添加批注，拖动可框选区域",
     "hintEdit": "点元素调整样式",
     "hintSwitchAnnotation": "切换批注",
-    "hintToggleOff": "再按一次退出",
     "exitMode": "退出标注 / 编辑模式",
-    "switchMode": "切换标注与编辑模式",
+    "enterAnnotate": "进入标注模式",
+    "enterEdit": "进入编辑模式",
     "prevAnnotation": "上一个批注",
     "nextAnnotation": "下一个批注",
     "hintSpaceBefore": "按住",
@@ -233,7 +226,10 @@
     "activateInspectorHint": "标注元素、实时调样式，交给 AI"
   },
   "link": {
-    "openInspector": "在轻推中打开"
+    "openInspector": "在轻推中打开",
+    "openBadge": "轻推",
+    "openWith": "打开方式",
+    "openInBrowser": "在浏览器中打开"
   },
   "clip": {
     "annotations": "{n} 条批注",
@@ -249,12 +245,12 @@
     "emptyNote": "（没写意见）"
   },
   "dom": {
-    "title": "DOM 树",
+    "title": "页面结构",
     "expand": "展开",
     "collapse": "收起",
-    "close": "关闭 DOM 树",
+    "close": "关闭页面结构",
     "loading": "加载中…",
-    "failed": "DOM 树加载失败"
+    "failed": "页面结构加载失败"
   },
   "workspace": {
     "title": "工作区版本",
@@ -302,7 +298,8 @@
     "restoreCancel": "取消",
     "restoreHint": "把 {file} 恢复到 {commit} 时的内容",
     "restored": "已把 {file} 恢复到 {commit}",
-    "restoreFailed": "恢复版本失败：{message}"
+    "restoreFailed": "恢复版本失败：{message}",
+    "openInNudge": "在轻推中打开"
   },
   "commit": {
     "title": "提交改动",
@@ -342,7 +339,7 @@
     "productIntro": "这些是轻推的产品偏好；改动保存后立即生效。",
     "sectionGeneral": "通用",
     "language": "插件界面语言",
-    "languageHint": "「跟随 DSH」使用应用当前语言；选择中文 / English 只切换轻推自己的界面文字。",
+    "languageHint": "「跟随 DSH」使用应用当前语言；手动选择只切换轻推界面文字。",
     "languageAuto": "跟随 DSH",
     "languageZh": "中文",
     "languageEn": "English",
@@ -351,8 +348,8 @@
     "featureAnnotateHint": "关闭后工具栏不再显示「标注」，正在标注的页面会回到浏览模式。",
     "featureEdit": "编辑模式",
     "featureEditHint": "关闭后工具栏不再显示「编辑」，实时改样式和文字的入口会隐藏。",
-    "featureDomTree": "DOM 树",
-    "featureDomTreeHint": "显示页面右侧的 DOM 树入口。",
+    "featureDomTree": "页面结构",
+    "featureDomTreeHint": "显示页面右侧的页面结构（元素层级）入口。",
     "featureWorkspaceVersions": "工作区版本",
     "featureWorkspaceVersionsHint": "显示工作区文件、历史和提交面板的入口。",
     "featureHotReload": "页面自动刷新",
@@ -396,7 +393,14 @@
     "readOnly": "当前环境不允许在这里保存设置；下面显示的是当前生效的值，只能查看。",
     "reloadHint": "如果刚更新过插件，重启一次应用（或在设置里关掉轻推再打开）就会生效。",
     "featureFloatingComposer": "全屏时的悬浮输入框",
-    "featureFloatingComposerHint": "右侧面板全屏时，把对话输入框浮在面板上方，方便边标注边发消息。"
+    "featureFloatingComposerHint": "右侧面板全屏时，把对话输入框浮在面板上方，方便边标注边发消息。",
+    "sectionShortcuts": "快捷键",
+    "hotkeyHint": "单键只在被检查的网页内生效，输入框里打字不会触发；修改后立即生效。",
+    "hotkeyFixedHint": "固定键，不可修改",
+    "hotkeyRecording": "按下按键…（Esc 取消）",
+    "hotkeyConflict": "这个键已被其它快捷操作使用",
+    "hotkeyReset": "恢复默认快捷键",
+    "hotkeyScopeHint": "「打开轻推 / 页面结构 / 工作区版本」属于应用级快捷键，仍在 DSH 设置 → 快捷键 中修改。"
   },
   "floating": {
     "collapse": "收起消息区",

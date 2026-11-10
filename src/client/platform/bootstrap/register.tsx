@@ -219,6 +219,13 @@ function apply(ctx) {
     return installFloatingComposer(typeof document === 'undefined' ? null : document);
   }, 'nudge: floating composer');
 
+  // Conversation HTML links: a passive 「轻推」badge plus a small open-with
+  // chooser. Anchors keep their own click handler, so the chat's link-opening
+  // preference stays the default.
+  ctx.effect(function () {
+    return installConversationLinkBadges(ctx);
+  }, 'nudge: conversation link badges');
+
   ctx.effect(function () {
     return locale.register(NS, {
       zh: readLocaleDict('zh'),
@@ -322,7 +329,8 @@ function apply(ctx) {
 
   ctx.inject(['contextMenus'], function (scope) {
     scope.effect(function () {
-      return scope.contextMenus.register({
+      // Message links (URL target): open the exact URL in an inspector tab.
+      var disposeUrl = scope.contextMenus.register({
         id: 'nudge.url',
         target: 'url',
         order: 90,
@@ -343,6 +351,34 @@ function apply(ctx) {
           ];
         },
       });
+      // File mentions (file target): only HTML files, opened through the
+      // session preview server so a workspace path becomes a real page URL.
+      var disposeFile = scope.contextMenus.register({
+        id: 'nudge.file',
+        target: 'file',
+        order: 90,
+        resolve: function (target) {
+          if (pluginConfigValues().contextMenuLink !== true) return [];
+          var sessionId = target && target.sessionId ? target.sessionId : '';
+          var path = target && typeof target.path === 'string' ? target.path : '';
+          if (sessionId === '' || !isHtmlWorkspacePath(path)) return [];
+          return [
+            {
+              id: 'nudge',
+              icon: { key: 'nudge.open' },
+              label: t('link.openInspector'),
+              disabled: ctx.sidebarRightTabs.get(TAB_KIND) === undefined,
+              run: function () {
+                openWorkspaceFileInNudge(ctx, sessionId, path);
+              },
+            },
+          ];
+        },
+      });
+      return function () {
+        disposeUrl();
+        disposeFile();
+      };
     }, 'nudge: link context menu');
   });
 

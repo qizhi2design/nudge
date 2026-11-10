@@ -94,6 +94,7 @@
 			(cursorSheet = null),
 			(theme = copyTheme(DEFAULT_THEME)),
 			(locale = copyLocale(DEFAULT_LOCALE)),
+			(hotkeys = copyHotkeys(DEFAULT_HOTKEYS)),
 			(destroyed = !1),
 			(listenerOffs = []),
 			(observers = []),

@@ -9,18 +9,18 @@
 
 | 测试 | 结果 |
 | --- | --- |
-| `node test/runtime-smoke.mjs` | 445 checks / 0 failures（新增 structure payload / elementKey / applyInsert / applyMoveElement；新增标注模式 ↑ / ↓ 批注切换与 Esc 分层退出） |
-| `node test/client-smoke.mjs` | 172 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化 / 5 条 fixed 行与工具提示文案） |
+| `node test/runtime-smoke.mjs` | 462 checks / 0 failures（新增 structure payload / elementKey / applyInsert / applyMoveElement；新增单键 A / E 激活、可配置页面热键、↑ / ↓ 批注切换与 Esc 分层退出） |
+| `node test/client-smoke.mjs` | 190 ok / 0 FAIL（含结构 wire 载荷 / partial 状态机 / replay 过滤 / 结构撤销 / 本地化 / 3 条应用级命令、2 条 fixed 行、HTML 链接识别与聊天徽标文案） |
 | `node test/brand-icon.test.mjs` | 26 checks / 0 failures（`icon.svg` 元信息 / 与 `NudgeMark` 逐形状几何一致 / Tab、选择菜单、标签菜单、右键菜单、设置导航五个身份位统一） |
 | `node test/toolbar-hot-reload.test.mjs` | 39 checks / 0 failures（自动刷新选中/取消/待刷新与面板文案宽度） |
 | `node test/dock-panel.test.mjs` | 37 checks / 0 failures（单 Dock 状态、宽度 clamp/键盘/双击、浮层 Esc、嵌入面板） |
 | `node test/client-theme.test.mjs` | 36 checks / 0 failures（body token / 深色翻转 / 系统兜底 / store 通知 / 组件渲染） |
-| `node test/settings-page.test.mjs` | 42 checks / 0 failures（设置 → 轻推：语言 / 功能开关 / 右键菜单 / 关于与更新 / 只读） |
-| `node test/workspace-panel.test.mjs` | 106 checks / 0 failures（文件 / 分支 / 提交 / 恢复 + hotReloadDecision + 嵌入 Dock / 无 git 瘦身） |
+| `node test/settings-page.test.mjs` | 67 checks / 0 failures（设置 → 轻推：语言 / 功能开关 / 快捷键录制 / 右键菜单 / 关于与更新 / 只读） |
+| `node test/workspace-panel.test.mjs` | 120 checks / 0 failures（文件 / 分支 / 提交 / 恢复 + hotReloadDecision + 文件行「在轻推中打开」+ 嵌入 Dock / 无 git 瘦身） |
 | `node test/clip-annotations.test.mjs` | 111 checks / 0 failures（含真实 cordis HMR「僵尸包装」回归：根单例安装 / 稳定 dispatcher / 幂等 / 恢复） |
 | `node test/source-sync.test.mjs` | 35 groups ok（结构路由回退 / 文本锚点 / 截断守卫 / JS 源拒绝 / move DOM path / insert / 元素 handle / candidates 诊断） |
-| `node test/workspace-domain.test.mjs` | 235 assertions / 0 failures（真实临时 git 仓库 + 真实静态服务器 + watcher） |
-| `node test/host-integration.test.mjs` | 65 checks / 0 failures（含产品偏好 config / configUpdate 与 about 版本桥） |
+| `node test/workspace-domain.test.mjs` | 238 assertions / 0 failures（真实临时 git 仓库 + 真实静态服务器 + watcher） |
+| `node test/host-integration.test.mjs` | 82 checks / 0 failures（含产品偏好 config / configUpdate、页面热键校验与 about 版本桥） |
 | `node test/workspace-e2e.test.mjs` | 58 checks / 0 failures（真实 Host 插件 + 真实 git 仓库 + HTTP 预览 + 热更新 revision） |
 | `node test/host-bar-parity.test.mjs` | 30 checks / 0 failures（宿主浮条 vs 页面浮条：调色板 / Lucide 图标几何 / 48px 胶囊与控件尺寸逐项一致，防止克隆漂移改掉外观） |
 | `node test/floating-composer.test.mjs` | 108 checks / 0 failures（全屏底部对话：语义标记 / 贴底输入框 / 点输入框展开消息（含标注模式）/ 展开态「收起」与「收缩为悬浮按钮」两个独立控件（位置分离 + 各自动作）/ 输入条态只剩收缩控件 / 悬浮按钮恢复 / 宿主标注浮条（显隐 / 计数 / 拖动 / 动作转发 / 两段丢弃）/ 页面失焦收起 / 页面底部安全区发布 / 会话隔离 / owner 隔离） |
@@ -52,8 +52,8 @@
   - 页面只保留编号 pin / 文字高亮，**不再显示页面左下角浮动评论卡**（编辑 / 删除通过点 pin、再次点击已标注元素，或对话框 clip 卡片完成）；
   - 页面底部出现 Codex 风格「正在批注 · N」浮条：六点拖拽手柄（可拖动、自动夹在视口内）+ 定位最新批注 + 隐藏 / 显示标记 + 丢弃批注（两步确认）+ 蓝色「发送」+「×」退出。
 - 浮条动作验收：隐藏标记后 pin / 区域一起隐藏、浮条保留；再次点击恢复；丢弃批注需要连续两次点击才会清空。
-- 批注切换验收：标注模式下按 `↑` / `↓` 循环切换批注（首尾相接）；当前批注滚动到视口中央并闪一下，同时打开该批注的编辑框且不抢输入焦点，因此可以连续按方向键逐条浏览；焦点在编辑框 textarea 内时方向键仍移动光标，不切换批注；没有批注时方向键交还页面滚动。
-- 模式热键验收：`⌘⇧.` / `⌘⇧E`（Windows / Linux 为 `Ctrl+Shift+…`）分别独立进入 / 退出标注与编辑模式；tooltip 同时展示当前生效键位、「再按一次退出」、`↑` `↓` 切换批注与 `Esc` 退出。
+- 批注切换验收：标注模式下按 `↑` / `↓`（默认键，可在设置页改）循环切换批注（首尾相接）；当前批注滚动到视口中央并闪一下，同时打开该批注的编辑框且不抢输入焦点，因此可以连续按方向键逐条浏览；焦点在编辑框 textarea 内时方向键仍移动光标，不切换批注；没有批注时方向键交还页面滚动。
+- 模式热键验收：页面内单键 `A` 进入标注、`E` 进入编辑（只在页面获得焦点且不在输入框时生效），退出统一按 `Esc`；不存在「再按一次切换」或 Shift+Tab 互切。tooltip 展示当前配置的单键、`↑` `↓` 切换批注与 `Esc` 退出。四个页面内键（进入标注 / 进入编辑 / 上一个批注 / 下一个批注）都能在 **设置 → 轻推 → 快捷键** 里改键并即时生效。
 - 按住 Space 临时交还页面；Esc 退出接管。
 - 标注保存、编辑、删除都走同一套 runtime → Client 事件链路。
 
@@ -77,7 +77,7 @@
 
 ## 2.3 Light / Dark 主题自适应
 
-- 宿主工具栏、DOM 树侧栏、clip 卡片等宿主 UI 从 `<body>` 读取 DSH `--dsw-alias-*` token；DSH 切换 Light / Dark 时通过 `theme/change` + body 属性监听即时重渲染，不刷新页面。
+- 宿主工具栏、页面结构侧栏、clip 卡片等宿主 UI 从 `<body>` 读取 DSH `--dsw-alias-*` token；DSH 切换 Light / Dark 时通过 `theme/change` + body 属性监听即时重渲染，不刷新页面。
 - Client 把 `themePaletteForRuntime(theme)`（`accent` / `panelBg` / `text` / `border` / `muted` / `danger` / `isDark`）用 `setTheme(...)` 推给注入的页面运行时，注入层按 `isDark` 在 `OVERLAY_DARK` / `OVERLAY_LIGHT` 之间切换。
 - Light：Composer / 悬浮样式卡为 `#ffffff` 表面 + `#0f1115` 文字，底部批注条 `#ffffff`，占位文字 `rgba(15,17,21,0.50)`；metadata 浮层复用宿主 palette（`#ffffff` 表面 / `#0f1115` 文字）；页面上不再残留 `#2f2f2f` 深色表面。
 - Dark：Composer / 样式卡为 `#2f2f2f`，底部批注条 `#262626`，文字 `#f5f5f5`，占位文字 `rgba(255,255,255,0.42)`；metadata 浮层复用宿主 palette（`#2c2c2e` 表面 / `#f9fafb` 文字）；Dark 覆盖层数值与改造前逐字节一致。
@@ -94,6 +94,14 @@
 - 页面 passthrough 只在焦点位于被检查页面、且无浮层输入目标时生效；`Esc` 仍可退出接管。
 - 回归用例：`runtime-smoke` 新增“样式卡打开时 Space 不 passthrough / 样式卡输入内 Space 不 passthrough”两项；真实 DSH Web Client 里点击编辑后按 Space，模式保持不变（此前会被 `编辑` 按钮的点击重新触发并退出编辑）。
 
+## 2.5 聊天 HTML 链接与工作区入口
+
+- **聊天徽标**：`[data-conversation-region="chat"]` 内、指向 `http(s)://…/*.html?…` 的链接后面出现「轻推」徽标（`data-dsh-nudge-link-badge`）；`.htm/.HTML` 同样识别并保留查询串，`.md`/图片/`javascript:` 等不装饰。React 重渲染后由 MutationObserver 重新补上，卸载插件后徽标与 `data-dsh-nudge-link-mark` 全部清理。
+- **点击语义**：点徽标 = 按当前会话 `openTabIn(sessionId, 'nudge', { params: { url } })` 打开轻推标签并展开侧栏；点徽标旁 `▾` = 打开「打开方式」菜单，含「在浏览器中打开」（`window.open`）与「在轻推中打开」，**不拦截原链接的默认点击**，因此 DSH 的链接打开偏好不受影响。菜单支持点击外部 / Esc 关闭。
+- **工作区文件行**：工作区→文件列表每行右侧新增轻推图标按钮（`data-workspace-open-nudge`），点击先 `previewOpen` 再在新轻推标签打开该 URL，不替换当前标签、不触发当前 carrier 导航；主点击仍是打开预览并高亮当前文件。
+- **文件右键菜单**：注册 `contextMenus` 的 `file` 目标：仅当路径以 `.html/.htm` 结尾时追加「在轻推中打开」；聊天文件引用、文件树等同一个 `file` 目标的右键菜单都会出现。点击调用 `previewOpen`（Host 现接受 source root 内的绝对路径，越界绝对路径明确拒绝）后在轻推标签打开；非 HTML 文件、无会话、`contextMenuLink` 关闭时都不出现。
+- **回归**：`client-smoke` 覆盖 `isHtmlConversationLinkHref`（绝对/相对/大小写/查询串/非 HTML/非 http）与新增文案；`workspace-panel` 覆盖文件行轻推入口的 `previewOpen` + `openTabIn` 参数；插件卸载时观察器、菜单与徽标均释放。
+
 ## 3. 标注持久化说明
 
 - clip 草稿保存在 Client 内（按 Session 维度，内存态）：页面刷新会清空；插件热重载（HMR）**不会**清空——草稿与发送 dispatcher 挂在页面级共享状态上，新旧模块实例读写同一份记录。
@@ -108,7 +116,7 @@
 - 点击元素 → 22px 悬浮样式卡（表面颜色跟随宿主 Light / Dark）；页面保持满宽，无右侧 Dock。
 - 卡片为可折叠分组：默认展开「文本内容 + 文字样式」（常用场景就是改文字），其余折叠：布局、间距、外观、高级。点分组标题展开 / 收起。元素没有直接文本节点时，文本内容分组整体不渲染。
 - 文本内容只改元素的直接文本节点（保留子元素结构）；属性编辑走 `design-text` / `design-attr` 事件，与样式共用撤销栈与源码同步队列。
-- 工具栏「DOM 树」开关 → 页面右侧 DOM 侧边栏：懒加载树、当前选中高亮且祖先自动展开；点节点即选中该元素、滚动到可视区并闪烁（编辑模式下同时打开样式卡）。
+- 工具栏「页面结构」开关 → 页面右侧结构侧边栏：懒加载树、当前选中高亮且祖先自动展开；点节点即选中该元素、滚动到可视区并闪烁（编辑模式下同时打开样式卡）。
 - 内容编辑只改元素的直接文本节点（保留子元素结构），属性编辑会进入 `design-text` / `design-attr` 事件，与样式共用撤销栈与源码同步队列。
 - 取消回滚本次卡片修改；圆形 ✓ 保留；Esc 等同取消。
 - 指针移到样式卡（以及标注 Composer / 底部批注条 / pin）上时，注入光标与页面 hover 高亮、metadata 浮层让位：面板使用系统原生光标，不会在卡片上画蓝色光标点；指针移回页面立即恢复。实现：`overlay root` 显式 `cursor: auto`（覆盖页面级 `cursor: none` 的继承），`syncPointerCursor` / hover / metadata 用 `pointerOverOwnUi()`（`elementFromPoint` + 自有节点判定）排除自有 UI。
@@ -132,39 +140,43 @@
 
 ## 6. 双行工具栏
 
-- 工具栏固定上下两行：第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往，38px）；第二行是轻推操作栏（34px），按左右两组摆放：左组是模式与面板开关（标注 / 编辑、DOM / 工作区 / 自动刷新），右组是历史与出口（撤销 / 重做 / 在系统浏览器打开 / 快捷键表），中间弹性留白——全屏超宽时不会出现一边挤成一撮、另一边一大段空白。右侧边栏不再出现「所有按钮挤在一行」的形态。
+- 工具栏固定上下两行：第一行是原生浏览器栏（后退 / 前进 / 刷新 / 地址栏 / 前往，38px）；第二行是轻推操作栏（34px），按左右两组摆放：左组是模式与面板开关（标注 / 编辑、页面结构 / 工作区 / 自动刷新），右组是历史与出口（撤销 / 重做 / 在系统浏览器打开），中间弹性留白——全屏超宽时不会出现一边挤成一撮、另一边一大段空白。右侧边栏不再出现「所有按钮挤在一行」的形态。
 
-- 第二行按可用宽度自适应：≥580px 时「DOM 树 / 工作区版本」与模式、自动刷新一样显示「图标 + 文案」；460–579px 时只保留这两个面板入口的图标；<460px 时全部标签收成图标（自动刷新保留选中底色）。切换宽度不出现横向滚动或重叠。
+- 第二行按可用宽度自适应：≥580px 时「页面结构 / 工作区版本」与模式、自动刷新一样显示「图标 + 文案」；460–579px 时只保留这两个面板入口的图标；<460px 时全部标签收成图标（自动刷新保留选中底色）。切换宽度不出现横向滚动或重叠。
 - 两行使用同一套 DSH 工具栏 Token：`--dsw-alias-bg-base` 背景、`.5px` 分隔线、28px 按钮、`--dsw-radius-sm` 圆角；地址栏聚焦时使用 business 色描边。
 - `<460px` 时第二行的标注 / 编辑标签收成图标（tooltip 仍有完整说明）；`<430px` 再隐藏前进与「前往」（地址栏 Enter 仍可跳转）。
 - 自动刷新待命时，刷新按钮显示 warn 色圆点/待命高亮，两行布局下同样保留。
-- 操作栏最右侧的键盘按钮展开 / 收起「轻推快捷键」表：表内列出当前生效键位（含只读的 Space 行），不覆盖 webview，而是把工具栏撑高一行；Esc 或再次点按钮收起。
+- 操作栏不再提供「轻推快捷键」速查面板（原键盘按钮已移除）：快捷键配置统一在 设置 → 轻推 → 快捷键，应用级命令在 DSH 设置 → 快捷键。
 - **不再**在工具栏下方常驻通知条；改为 hover 标注 / 编辑按钮时弹出交互 tooltip：点击 / 拖拽说明 + 「按住 `Space` 临时操作网页」（`Space` 用 lucide 键帽），并附带该开关的当前生效键位。tooltip 在模式内 / 模式外都可 hover 查看。
 - 阈值是纯函数 `toolbarLayout(width)`（`src/client/ui/layout.ts`），`client-smoke` 覆盖 wide / sidebar / compact / tiny / 未测量五种情况。
 
 ## 6.2 快捷键（系统注册 + lucide 键帽）验收
 
-- **注册**：轻推通过 `ctx.inject(['shortcuts'])` 注册 5 个可编辑命令（`nudge.open` / `nudge.annotate.toggle` / `nudge.edit.toggle` / `nudge.dom.toggle` / `nudge.workspace.toggle`）和 5 个只读 fixed 行（`nudge.fixed.space` / `nudge.fixed.escape` / `nudge.fixed.shiftTab` / `nudge.fixed.annotationPrev` / `nudge.fixed.annotationNext`），命令随后出现在 DSH「设置 → 快捷键」中，可录制 / 改键 / 恢复默认；fixed 行只做参考与冲突占位，不拦截页面输入。
-- **默认键位**：标注切换默认 `primary+shift+Period`（即参考实现的 `CmdOrCtrl+Shift+.`）；其余为 `primary+shift` + `I/E/D/G`，覆盖 `desktop:macos/windows/linux` 与 `web:macos/windows`（web:linux 不注册，符合 shortcut 服务的 Web 限制）。
-- **模式热键语义**：标注 / 编辑各自一个独立开关热键——按一次进入，再按一次退出；在另一个模式里按键会直接切到该模式。命令标签明确写成「进入 / 退出标注模式」「进入 / 退出编辑模式」，tooltip 与 DSH 快捷键面板文案一致。
-- **页面内键位**：focus 在注入页面里时，`↑` / `↓` 只在标注模式生效，循环切换已添加的批注（滚动定位 + 高亮 + 打开该批注的编辑框，且不抢焦点，因此可连续按）；没有批注时按键继续交给页面滚动。`Esc` 先关闭样式卡 / 批注编辑框，再退出标注或编辑模式。
-- **宿主内 Esc**：焦点在宿主工具栏 / Dock（而不是页面）时，`Esc` 同样退出标注 / 编辑模式；输入框获得焦点、快捷键表展开、或事件已被其它浮层消费时不抢占。
+- **注册**：轻推通过 `ctx.inject(['shortcuts'])` 只注册 3 个应用级可编辑命令（`nudge.open` / `nudge.dom.toggle` / `nudge.workspace.toggle`）和 2 个只读 fixed 行（`nudge.fixed.space` / `nudge.fixed.escape`）。标注 / 编辑的激活键不再占用 DSH 全局键位，避免单键在聊天输入框里误触；模式键统一由页面运行时处理。
+- **默认键位**：应用级命令为 `primary+shift` + `I/D/G`，覆盖 `desktop:macos/windows/linux` 与 `web:macos/windows`（web:linux 不注册，符合 shortcut 服务的 Web 限制）。
+- **模式热键语义**：页面内单键 `A` 进入标注、`E` 进入编辑（默认值，可在 设置 → 轻推 → 快捷键 修改），只在页面获得焦点且不在输入框里输入时生效；退出统一按 `Esc`，没有「再按一次切换」和 Shift+Tab 互切。tooltip 只展示当前生效的单键 + Esc，不再展示多行切换说明。
+- **设置页快捷键**：「设置 → 轻推 → 快捷键」卡片列出 4 个可改单键（进入标注 / 进入编辑 / 上一个批注 / 下一个批注，录制后立即保存并同步到运行中的页面）和 2 个固定只读行（Esc 退出、Space 临时操作），并提供「恢复默认快捷键」。应用级命令仍在 DSH「设置 → 快捷键」中改键（设置页有说明文字）。
+- **页面内键位**：focus 在注入页面里时，`↑` / `↓`（可改）只在标注模式生效，循环切换已添加的批注（滚动定位 + 高亮 + 打开该批注的编辑框，且不抢焦点，因此可连续按）；没有批注时按键继续交给页面滚动。`Esc` 先关闭样式卡 / 批注编辑框，再退出标注或编辑模式。
+- **宿主内 Esc**：焦点在宿主工具栏 / Dock（而不是页面）时，`Esc` 同样退出标注 / 编辑模式；输入框获得焦点、后台隐藏 Tab、或事件已被其它浮层消费时不抢占。
 - **路由**：命令解析当前聚焦的右侧边栏 target；聚焦的轻推 Tab 有已挂载 body 时直接派发给 tab 命令总线；没有时聚焦同会话已有轻推 Tab，或按目标 pane 打开新 Tab（带 `params.mode` / 浏览器 URL），面板命令在 body 注册后由待处理队列补发；`isTargetCurrent` 会拒绝过期的 target。
 - **可用性**：功能开关关闭时命令返回 blocked（`shortcut.featureOff`）；没有会话 / target 时返回 `shortcut.noSession`；register 单条失败被隔离，不影响其它命令。
-- **键帽**：`keycapModel(binding, platform)` 是纯函数（`client-smoke` 覆盖 macOS `⌘/⇧`、Windows `Ctrl/⇧`、Space 图标与字母/标点映射）；tooltip、快捷键表共用 `ShortcutKeys`。
-- **无覆盖**：快捷键表是工具栏内布局行；交互提示是宿主自绘的 fixed tooltip 卡片（`data-tooltip-card`），优先绘制在 toolbar 上方，不覆盖 `<webview>`。`data-shortcut-sheet` / `data-mode-hint-content` / `data-tooltip-card` 作为 DOM 契约供验收断言。
+- **键帽**：`keycapModel(binding, platform)` 是纯函数（`client-smoke` 覆盖 macOS `⌘/⇧`、Windows `Ctrl/⇧`、Space 图标与字母/标点映射）；tooltip 与设置页键帽共用 `ShortcutKeys`。
+- **无覆盖**：交互提示是宿主自绘的 fixed tooltip 卡片（`data-tooltip-card`），优先绘制在 toolbar 上方，不覆盖 `<webview>`。`data-mode-hint-content` / `data-tooltip-card` 作为 DOM 契约供验收断言。
 - **真实壳验证**：在 DSH Web Client（同一套 shell + 同一 Client bundle）里 hover 标注按钮，`data-tooltip-card` 定位在 toolbar 上方、文案与 Space 键帽完整可见；此前 Radix popper 的方案在该壳里 wrapper 停在 `translate(0,-200%)`（`isPositioned=false`），tooltip 实际渲染到视口外，这是“重启后仍看不到”的根因。
 - **主题适配**：`TooltipProvider` 接收 `InspectorTheme`，Light 主题卡片 `background = #e9ecf2`（`--dsw-alias-bg-overlay`）、文字 `#0f1115`；Dark 主题卡片 `background = #2c2c2e`（`--dsw-alias-tooltip-bg`）、文字浅色；边框 / 阴影 / keycap 同步跟随 DSH token。Light / Dark 截图预览见 `docs/evidence/23` / `24`。
-- **验证**：`node test/client-smoke.mjs` 断言注册 id 顺序、默认键位、5 条 fixed 行（含 ↑ / ↓）、三条 resolve 分支（feature gate / no session / live dispatch）、新 Tab 打开与队列补发、键帽模型与新增 tooltip / 批注导航文案；`node test/runtime-smoke.mjs` 新增「标注模式 ↑ / ↓ 循环切换（首尾相接、不抢焦点、textarea 内保持光标行为）」「Esc 先关编辑框再退出标注 / 编辑」「无批注时方向键交还滚动」用例；`../validation/runtime-cdp.mjs` 在真实 Chromium 里同样验证方向键切换、`preventDefault`、焦点不被抢、Esc 分层退出（116 checks）；`npx tsc --noEmit` 通过。
+- **验证**：`node test/client-smoke.mjs` 断言注册 id 顺序、默认键位、3 条应用级命令 + 2 条 fixed 行、resolve 分支（feature gate / no session / live dispatch）、新 Tab 打开与队列补发、键帽模型、插件设置页热键默认值、新增 tooltip / 设置页文案与 HTML 链接识别规则；`node test/runtime-smoke.mjs` 覆盖单键 A / E 激活、修饰键与输入框守卫、setHotkeys 改键 / 非法值回退、↑ / ↓ 批注切换（首尾相接、不抢焦点）、Esc 分层退出；`node test/settings-page.test.mjs` 渲染快捷键卡片（4 个录制行 / 2 个固定行 / 恢复默认），settings-dev 另用内存渲染测试覆盖录制交互（修饰键忽略、Esc 取消、保留键 / 重复键拒绝、即时保存）；`node test/host-integration.test.mjs` 覆盖 Host 侧热键白名单与非法值回退；`../validation/runtime-cdp.mjs` 在真实 Chromium 里验证单键 A / E、setHotkeys 自定义键、↑ / ↓ 切换与 Esc 分层退出（127 checks）；`npx tsc --noEmit` 通过。
 
 ## 6.1 设置页（产品偏好）验收
 
 - **入口**：设置 → 左侧「轻推」（排在「项目目录」之后），与其它插件配置页同级。
 - **通用**：插件界面语言三档（跟随 DSH / 中文 / English）。选择中文或 English 后轻推自身界面文案立即切换（由 Client 配置 store + 内嵌词典实现），无需重载；DSH 外壳文案仍跟随宿主语言。
-- **功能**：标注模式、编辑模式、DOM 树、工作区版本、自动热更新五个开关。
+  - 覆盖范围：工具栏按钮（标注 / 编辑 / 页面结构 / 工作区版本 / 自动刷新）、模式 tooltip、页面结构 / 工作区面板、批注浮层与页面内运行时文案、聊天里的轻推徽标与打开方式菜单、设置页本身；全部经 `usePluginTranslator` 跟随插件语言，`auto` 回退 DSH 语言。
+  - 回归：`client-smoke` 用 `usePluginTranslator` 钩子断言 en 下 `toolbar.dom = Page structure`、zh 下 `页面结构`、auto 回退 DSH 翻译。
+- **功能**：标注模式、编辑模式、页面结构、工作区版本、自动热更新五个开关。
   - 关闭后工具栏入口立即隐藏（`InspectorToolbar` 根据配置 store 过滤按钮）；
-  - 若会话正停留在被关闭的模式，自动退回浏览模式；已打开的 DOM / 工作区面板自动关闭；
+  - 若会话正停留在被关闭的模式，自动退回浏览模式；已打开的页面结构 / 工作区面板自动关闭；
   - 关闭自动热更新后不再轮询 `watchPoll`，页面不再自动刷新。
+- **快捷键**：新增「快捷键」卡片，4 个可录制单键（进入标注 / 进入编辑 / 上一个批注 / 下一个批注，默认 A / E / ↑ / ↓）点一下进入录制、按新键即保存并同步到运行中的页面；Esc 取消录制；保留键（Esc / Space）和与其它行重复的键会被拒绝并给出提示。卡片另列出 2 个固定只读行（Esc 退出、Space 临时操作）、「恢复默认快捷键」按钮，并说明应用级命令仍在 DSH「设置 → 快捷键」中修改。配置写入 profile `cordis.patch.yml`（`hotkeyAnnotate` / `hotkeyEdit` / `hotkeyPrevAnnotation` / `hotkeyNextAnnotation`），非法值在 Host 侧回退默认。
 - **右键菜单**：链接（含聊天消息内链接）右键菜单与浏览器标签 ⋮ 菜单的「在轻推中打开」可独立关闭；关闭后 `resolve` 返回空数组 / 菜单项不渲染，重新打开立即恢复。
 - **关于与更新**：显示版本、构建时间（`lib/*.js` 最新 mtime）、git 分支 / 短提交 / 脏状态、运行环境、插件目录；「检查更新」调用 Host `about(check=true)`，本地 `link:` 开发版如实显示「无法在线检查更新」，插件管理器缺失时也明确报告 unavailable。
 - **保存语义**：每次切换即时写入 profile 的 `cordis.patch.yml` 并镜像到 Client store；失败回滚到上一个值并显示错误；「恢复默认」一次写回全部产品默认值；read-only 部署禁用全部控件且不调用 `configUpdate`。
@@ -184,10 +196,10 @@
 
 ## 6.4 面板 Dock 验收
 
-- DOM 树 / 工作区共用右侧单 Dock：一次只渲染一个面板，顶部一级 Tab 切换；打开第二个只会切换 Tab，不会并排挤压页面。
+- 页面结构 / 工作区共用右侧单 Dock：一次只渲染一个面板，顶部一级 Tab 切换；打开第二个只会切换 Tab，不会并排挤压页面。
 - 停靠宽默认 300，可拖拽 240–420、双击 / Home 复位，宽度写入 `localStorage`；宿主宽 <760px 自动浮层（320px，页面全宽，Esc 关闭）。
 - 工作区无 git 时隐藏「版本 / 提交」Tab，仓库提示收进文件列表；文件父目录默认隐藏、hover / focus 才显示。
-- DOM 树与工作区嵌入 Dock 后不再各自渲染标题栏和关闭按钮；关闭、刷新只在 Dock 头部出现一次；拖动分隔线时全屏 catcher 保证 webview 上的指针事件不断流。
+- 页面结构与工作区嵌入 Dock 后不再各自渲染标题栏和关闭按钮；关闭、刷新只在 Dock 头部出现一次；拖动分隔线时全屏 catcher 保证 webview 上的指针事件不断流。
 
 ## 7. 视觉截图
 
@@ -201,6 +213,4 @@
 | 文字选择批注 | `docs/evidence/20-codex-style-text-selection.png` |
 | Light 主题覆盖层（白色底部条 + metadata + pin） | `docs/evidence/21-theme-light.png` |
 | Dark 主题覆盖层（`#262626` 底部条 + `#2c2c2e` metadata + pin） | `docs/evidence/22-theme-dark.png` |
-| 快捷键组件预览（真实组件 + DSH dark token 的 harness 渲染，非运行中应用截图） | `docs/evidence/23-shortcut-sheet-dark.png` |
-| 快捷键组件预览（Light token） | `docs/evidence/24-shortcut-sheet-light.png` |
 | 品牌标记总览：`icon.svg` 多尺寸（96/64/32/24/16 × Light/Dark）+ `NudgeMark` 身份位示例 | `docs/evidence/25-brand-icon.png` |

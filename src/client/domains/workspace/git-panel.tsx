@@ -57,6 +57,43 @@ function workspacePanelRowStyle(theme, active) {
   };
 }
 
+/** Inner click surface of a workspace file row (the row itself is a container). */
+function workspacePanelFileMainStyle() {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flex: '1 1 auto',
+    minWidth: 0,
+    padding: 0,
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+  };
+}
+
+/** Trailing「在轻推中打开」action shown on every HTML file row. */
+function workspacePanelOpenInNudgeStyle(theme) {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 'none',
+    width: 22,
+    height: 22,
+    padding: 0,
+    border: 'none',
+    borderRadius: 5,
+    background: 'transparent',
+    color: theme.faint || theme.muted,
+    cursor: 'pointer',
+    transition: 'background-color 120ms ease, color 120ms ease',
+  };
+}
+
 function workspacePanelMutedStyle(theme, extra) {
   return Object.assign(
     {
@@ -340,6 +377,36 @@ function NudgeWorkspacePanel(props) {
       },
     );
   }
+  /** Open one workspace HTML page in a fresh Nudge tab, keeping this panel. */
+  function openInNudge(file) {
+    if (!file || sessionId === '') return;
+    setError('');
+    call('previewOpen', previewOpenArgs(sessionId, file.path)).then(
+      function (result) {
+        if (!aliveRef.current) return;
+        if (!result || !result.url) {
+          setError(t('workspace.openFailed', { message: 'previewOpen' }));
+          return;
+        }
+        var sidebar = props.ctx && props.ctx.sidebarRight;
+        if (sidebar && typeof sidebar.openTabIn === 'function') {
+          sidebar.openTabIn(sessionId, TAB_KIND, { params: { url: result.url } });
+          if (typeof sidebar.isExpanded === 'function' && sidebar.isExpanded() === false && typeof sidebar.toggleExpanded === 'function') {
+            sidebar.toggleExpanded();
+          }
+          return;
+        }
+        // No tab service (harness / web without sidebar): fall back to the
+        // current carrier so the action still opens the page.
+        if (typeof props.onNavigate === 'function') props.onNavigate(result.url);
+      },
+      function (failure) {
+        if (!aliveRef.current) return;
+        setError(t('workspace.openFailed', { message: workspaceErrorMessage(failure) }));
+      },
+    );
+  }
+
 
   // ------------------------------------------------------------- branches
 
@@ -665,17 +732,11 @@ function NudgeWorkspacePanel(props) {
     var name = file.name ? String(file.name) : workspacePathName(path);
     var active = activeFile === path;
     return h(
-      'button',
+      'div',
       {
         key: 'file:' + path,
-        type: 'button',
-        'data-workspace-file': path,
-        'aria-pressed': active,
-        title: path,
-        onClick: function () {
-          openFile(file);
-        },
-        style: workspacePanelRowStyle(theme, active),
+        'data-workspace-file-row': path,
+        style: Object.assign(workspacePanelRowStyle(theme, active), { gap: 4 }),
         onMouseEnter: function (event) {
           if (!active) event.currentTarget.style.background = theme.hover || theme.layer2;
         },
@@ -683,38 +744,78 @@ function NudgeWorkspacePanel(props) {
           if (!active) event.currentTarget.style.background = 'transparent';
         },
       },
-      h(Icon.file, { size: 11 }),
-      h('span', { style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, name),
-      dir !== ''
-        ? h(
-            'span',
-            {
-              'data-workspace-file-dir': '',
-              style: { flex: 'none', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: theme.faint || theme.muted, fontSize: 10.5 },
-            },
-            dir,
-          )
-        : null,
-      change !== ''
-        ? h(
-            'span',
-            {
-              'data-workspace-change': change,
-              style: {
-                flex: 'none',
-                padding: '0 4px',
-                borderRadius: 4,
-                background: 'color-mix(in srgb, ' + (theme.warn || theme.brand) + ' 14%, transparent)',
-                color: theme.warn || theme.muted,
-                fontSize: 10,
-                lineHeight: '16px',
+      h(
+        'button',
+        {
+          type: 'button',
+          'data-workspace-file': path,
+          'aria-pressed': active,
+          title: path,
+          onClick: function () {
+            openFile(file);
+          },
+          style: workspacePanelFileMainStyle(),
+        },
+        h(Icon.file, { size: 11 }),
+        h('span', { style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, name),
+        dir !== ''
+          ? h(
+              'span',
+              {
+                'data-workspace-file-dir': '',
+                style: { flex: 'none', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: theme.faint || theme.muted, fontSize: 10.5 },
               },
-            },
-            changeLabelText(t, change),
-          )
-        : null,
+              dir,
+            )
+          : null,
+        change !== ''
+          ? h(
+              'span',
+              {
+                'data-workspace-change': change,
+                style: {
+                  flex: 'none',
+                  padding: '0 4px',
+                  borderRadius: 4,
+                  background: 'color-mix(in srgb, ' + (theme.warn || theme.brand) + ' 14%, transparent)',
+                  color: theme.warn || theme.muted,
+                  fontSize: 10,
+                  lineHeight: '16px',
+                },
+              },
+              changeLabelText(t, change),
+            )
+          : null,
+      ),
+      h(
+        'button',
+        {
+          type: 'button',
+          'data-workspace-open-nudge': path,
+          'aria-label': t('workspace.openInNudge'),
+          title: t('workspace.openInNudge'),
+          onClick: function (event) {
+            if (event) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+            openInNudge(file);
+          },
+          style: workspacePanelOpenInNudgeStyle(theme),
+          onMouseEnter: function (event) {
+            event.currentTarget.style.background = 'color-mix(in srgb, ' + (theme.brand || theme.accent) + ' 16%, transparent)';
+            event.currentTarget.style.color = theme.brand || theme.text;
+          },
+          onMouseLeave: function (event) {
+            event.currentTarget.style.background = 'transparent';
+            event.currentTarget.style.color = theme.faint || theme.muted;
+          },
+        },
+        h(Icon.nudge, { size: 12 }),
+      ),
     );
   }
+
 
   function renderFilesTab() {
     var visible = filterWorkspaceFiles(files, filter);

@@ -85,7 +85,7 @@ export function keycapKeyLabel(code: string): string {
 }
 
 /**
- * Pure keycap model shared by tooltips, the shortcut sheet and the mode hint.
+ * Pure keycap model shared by tooltips, the mode hint and the settings page.
  * Modifier order matches the DSH shortcut catalog so an override recorded in
  * Settings renders in the same reading order as the system reference.
  */

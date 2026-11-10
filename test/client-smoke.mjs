@@ -182,6 +182,7 @@ const ctx = {
   },
   sidebarRightTabs: {
     register(definition) { registrations.tabs.push(definition); return () => {} },
+    get() { return undefined },
   },
   sidebarRight: {
     openTab(kind, options) { registrations.opened = { kind, options } },
@@ -238,10 +239,7 @@ assert(zhDict['commit.emptyMessage'] === '请填写提交说明', 'commit guard 
 assert(enDict['workspace.title'] === 'Workspace versions', 'workspace panel title localized in en')
 assert(enDict['commit.emptyMessage'] === 'Enter a commit message', 'commit guard message localized in en')
 assert(enDict['hotReload.pending'] !== undefined, 'hot-reload pending string localized in en')
-assert(
-  zhDict['shortcut.exitMode'] === '退出标注 / 编辑模式' && enDict['shortcut.switchMode'] === 'Switch between annotate and edit',
-  'mode shortcut hints localized in both dictionaries',
-)
+assert(zhDict['shortcut.exitMode'] === '退出标注 / 编辑模式', 'mode exit hint localized in zh')
 assert(
   zhDict['shortcut.enterAnnotate'] === '进入标注模式' &&
     zhDict['shortcut.enterEdit'] === '进入编辑模式' &&
@@ -267,6 +265,16 @@ assert(
     typeof zhDict['settings.hotkeyRecording'] === 'string' &&
     typeof enDict['settings.hotkeyConflict'] === 'string',
   'settings hotkey section localized in both dictionaries',
+)
+assert(
+  zhDict['link.openBadge'] === '轻推' &&
+    zhDict['link.openWith'] === '打开方式' &&
+    zhDict['link.openInBrowser'] === '在浏览器中打开' &&
+    zhDict['workspace.openInNudge'] === '在轻推中打开' &&
+    enDict['link.openBadge'] === 'Nudge' &&
+    enDict['link.openWith'] === 'Open with' &&
+    enDict['workspace.openInNudge'] === 'Open in Nudge',
+  'conversation link badge and workspace open-in-Nudge copy localized',
 )
 assert(registrations.tabs.length === 1, 'exactly one tab type registered')
 assert(registrations.tabs[0].id === 'dsh.nudge', 'tab type id matches the plugin id')
@@ -295,7 +303,24 @@ assert(guideCard.length === 1 && guideCard[0].register.key === '@deepseek-ai/dsh
 const tabMenu = registrations.slots.filter((entry) => entry.register && entry.register.name === 'sidebar.right.tab.menu.item')
 assert(tabMenu.length === 1 && tabMenu[0].register.id === 'nudge-open-browser', 'browser tab menu action registered')
 
-assert(registrations.contextMenus.length === 1 && registrations.contextMenus[0].target === 'url' && registrations.contextMenus[0].id === 'nudge.url', 'link (URL) context menu action registered')
+assert(
+  registrations.contextMenus.length === 2 &&
+    registrations.contextMenus.some((menu) => menu.target === 'url' && menu.id === 'nudge.url') &&
+    registrations.contextMenus.some((menu) => menu.target === 'file' && menu.id === 'nudge.file'),
+  'message-link (URL) and HTML-file context menu actions registered',
+)
+const urlMenu = registrations.contextMenus.find((menu) => menu.target === 'url')
+const fileMenu = registrations.contextMenus.find((menu) => menu.target === 'file')
+assert(urlMenu.resolve({ sessionId: 'session-1', url: 'http://127.0.0.1:4173/index.html' }).length === 1, 'URL menu offers open-in-Nudge for a link')
+assert(
+  fileMenu.resolve({ sessionId: 'session-1', path: '/tmp/ws/demo/index.html' }).length === 1,
+  'file menu offers open-in-Nudge for an HTML file mention',
+)
+assert(fileMenu.resolve({ sessionId: 'session-1', path: '/tmp/ws/readme.md' }).length === 0, 'file menu ignores non-HTML files')
+assert(fileMenu.resolve({ sessionId: '', path: '/tmp/ws/demo/index.html' }).length === 0, 'file menu needs a session')
+workspaceTestHook.setPluginConfig({ contextMenuLink: false }, null)
+assert(fileMenu.resolve({ sessionId: 'session-1', path: '/tmp/ws/demo/index.html' }).length === 0, 'file menu respects the context-menu switch')
+workspaceTestHook.setPluginConfig({}, null)
 
 assert(
   registrations.shortcuts.map((command) => command.id).join(',') ===
@@ -324,6 +349,15 @@ assert(
   Array.isArray(workspaceTestHook.nudgeShortcutPageKeys) && workspaceTestHook.nudgeShortcutPageKeys.length === 1,
   'only the fixed Esc row remains a DSH page key (mode / arrow keys moved to plugin settings)',
 )
+const htmlLink = workspaceTestHook.isHtmlConversationLinkHref
+assert(typeof htmlLink === 'function', 'conversation HTML link helper is bundled')
+assert(htmlLink('http://127.0.0.1:4173/demo/index.html', 'http://127.0.0.1:4173/') === 'http://127.0.0.1:4173/demo/index.html', 'absolute HTML links are recognized')
+assert(htmlLink('/demo/about.htm', 'http://127.0.0.1:4173/') === 'http://127.0.0.1:4173/demo/about.htm', 'relative .htm links resolve against the page')
+assert(htmlLink('https://example.test/a/b.HTML?x=1', 'https://example.test/') === 'https://example.test/a/b.HTML?x=1', 'extension matching is case-insensitive and keeps the query')
+assert(htmlLink('http://127.0.0.1:4173/readme.md', 'http://127.0.0.1:4173/') === null, 'non-HTML links are left alone')
+assert(htmlLink('javascript:alert(1)', 'http://127.0.0.1:4173/') === null, 'non-http schemes are rejected')
+assert(htmlLink('', 'http://127.0.0.1:4173/') === null, 'empty hrefs are rejected')
+
 const keycapModel = workspaceTestHook.keycapModel
 const macKeys = keycapModel({ code: 'Period', modifiers: ['meta', 'shift'] }, 'macos')
 assert(
@@ -372,8 +406,19 @@ disposeQueued()
 workspaceTestHook.registerNudgeTabCommands('t2', 'session-1', { run: () => {} })()
 assert(workspaceTestHook.initialInspectorMode({ navigation: { params: { mode: 'annotate' } } }) === 'annotate', 'shortcut params open the inspector in annotate')
 assert(workspaceTestHook.initialInspectorMode({ navigation: { params: { mode: 'bogus' } } }) === 'browse', 'unknown shortcut params fall back to browse')
-assert(typeof workspaceTestHook.ShortcutSheet === 'function' && typeof workspaceTestHook.ModeHintContent === 'function', 'shortcut surfaces are exported from the UI bundle')
-assert(source.includes('data-shortcut-sheet'), 'bundle ships the shortcut sheet surface')
+assert(typeof workspaceTestHook.ModeHintContent === 'function', 'mode hint surface is exported from the UI bundle')
+const pluginT = workspaceTestHook.usePluginTranslator
+assert(typeof pluginT === 'function', 'plugin-language translator hook is bundled')
+workspaceTestHook.setPluginConfig({ language: 'en' }, null)
+const enT = pluginT(function (key) { return 'host:' + key })
+assert(enT('toolbar.dom') === 'Page structure', 'plugin translator follows the English preference for toolbar labels')
+assert(enT('toolbar.annotate') === 'Annotate' && enT('toolbar.edit') === 'Edit', 'plugin translator covers the mode toolbar labels')
+workspaceTestHook.setPluginConfig({ language: 'zh' }, null)
+const zhT = pluginT(function (key) { return 'host:' + key })
+assert(zhT('toolbar.dom') === '页面结构', 'plugin translator follows the Chinese preference for toolbar labels')
+workspaceTestHook.setPluginConfig({ language: 'auto' }, null)
+const autoT = pluginT(function (key) { return 'host:' + key })
+assert(autoT('toolbar.dom') === 'host:toolbar.dom', 'plugin translator falls back to the DSH translator in auto mode')
 assert(source.includes('mode-change'), 'bundle ships the runtime -> client mode channel')
 assert(source.includes('data-mode-hint-content'), 'bundle ships the hover tooltip hint')
 assert(source.includes('dshnudge-keycap'), 'bundle ships the Lucide keycap surface')

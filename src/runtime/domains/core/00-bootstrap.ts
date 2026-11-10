@@ -29,6 +29,10 @@
 		CURSOR_CSS = 'html, body, body * { cursor: none !important; } html, body { scrollbar-width: auto; }',
 		DEFAULT_LOCALE = { title: 'Add annotation', subtitle: 'For the selected element', placeholder: 'Describe how the agent should change this\u2026', cancel: 'Cancel', add: 'Add', save: 'Save', editTitle: 'Edit annotation', region: 'Region', designTitle: 'Adjust styles', designColor: 'Text color', designBackground: 'Background', designOpacity: 'Opacity', designFont: 'Font', designFontSize: 'Font size', designFontWeight: 'Weight', designCancel: 'Cancel', designApply: 'Done', designClose: 'Close', designPreview: 'Live preview', statusAnnotating: 'Annotating', statusSend: 'Send', statusExit: 'Exit annotate',  statusRemove: 'Remove', statusLocate: 'Locate annotation', statusHideMarkers: 'Hide markers', statusShowMarkers: 'Show markers', statusDiscard: 'Discard annotations', statusDiscardArmed: 'Click again to discard all annotations', statusMoveToolbar: 'Move toolbar', designLayout: 'Layout', designSpacing: 'Spacing', designTypography: 'Text', designAppearance: 'Appearance', designAdvanced: 'Advanced', designWidth: 'Width', designHeight: 'Height', designDisplay: 'Display', designPosition: 'Position', designOverflow: 'Overflow', designMargin: 'Margin', designPadding: 'Padding', designGap: 'Gap', designLineHeight: 'Line height', designLetterSpacing: 'Letter spacing', designTextAlign: 'Align', designBorder: 'Border', designBorderRadius: 'Radius', designShadow: 'Shadow', designTransform: 'Transform', designZIndex: 'Z-index', designVisibility: 'Visibility', designContent: 'Content', designDom: 'DOM', designTextContent: 'Text content', designNoDirectText: 'This element has no directly editable text node', designAncestors: 'Ancestors', designDescendants: 'Children', designNoDescendants: 'No child elements', designDelete: 'Delete element', designDeleteHint: 'Remove this element and its subtree', designMoveHint: 'Drag to reorder or nest' },
 		DEFAULT_THEME = { accent: '#4f8cff', annotationAccent: '#0069FB', annotationMarker: '#339cff', panelBg: '#ffffff', text: '#1f2430', border: '#d9dde6', muted: '#6b7280', danger: '#ef4444', isDark: !1 },
+		// Page-local activation keys are physical KeyboardEvent.code values so
+		// they stay layout-independent. `hotkeys` is the mutable closure copy the
+		// host overrides through api.setHotkeys().
+		DEFAULT_HOTKEYS = { annotate: 'KeyA', edit: 'KeyE', prevAnnotation: 'ArrowUp', nextAnnotation: 'ArrowDown' },
 		themeDarkExplicit = !1,
 		themeMedia = null,
 		themeMediaHandler = null,
@@ -60,6 +64,7 @@
 		cursorSheet = null,
 		theme = copyTheme(DEFAULT_THEME),
 		locale = copyLocale(DEFAULT_LOCALE),
+		hotkeys = copyHotkeys(DEFAULT_HOTKEYS),
 		destroyed = !1,
 		root = null,
 		layer = null,
@@ -79,3 +84,18 @@
 		wrappedReplaceState = null,
 		lastUrl = '',
 		lastPageTitle = ''
+
+	/**
+	 * Snapshot the page hotkeys so the defaults stay immutable: every field is a
+	 * physical KeyboardEvent.code string, falling back to the default when the
+	 * source is missing or empty.
+	 */
+	function copyHotkeys(source) {
+		var base = source || DEFAULT_HOTKEYS
+		return {
+			annotate: typeof base.annotate == 'string' && base.annotate !== '' ? base.annotate : DEFAULT_HOTKEYS.annotate,
+			edit: typeof base.edit == 'string' && base.edit !== '' ? base.edit : DEFAULT_HOTKEYS.edit,
+			prevAnnotation: typeof base.prevAnnotation == 'string' && base.prevAnnotation !== '' ? base.prevAnnotation : DEFAULT_HOTKEYS.prevAnnotation,
+			nextAnnotation: typeof base.nextAnnotation == 'string' && base.nextAnnotation !== '' ? base.nextAnnotation : DEFAULT_HOTKEYS.nextAnnotation
+		}
+	}

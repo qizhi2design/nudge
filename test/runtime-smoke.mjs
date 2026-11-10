@@ -1909,6 +1909,8 @@ async function run() {
   flushEvents(runtime2)
   runtime2.setMode('annotate')
   eq('no mode-change for a same-mode call', flushEvents(runtime2).some((event) => event.type === 'mode-change'), false)
+  runtime2.setMode('browse')
+  flushEvents(runtime2)
 
   // Single-key activation: A enters annotate, E enters edit, Esc is the only
   // way out. Focus in an input or a modifier chord never activates a mode.

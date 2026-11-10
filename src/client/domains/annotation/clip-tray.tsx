@@ -276,7 +276,7 @@ function ClipCard(props) {
  * composer card. Renders nothing while the draft has no clips.
  */
 function ClipAnnotationTray(props) {
-  var t = props.t;
+  var t = usePluginTranslator(props.t);
   var theme = useDshTheme(props.ctx);
   var sessionId = props.sessionId || '';
   var entry = useClipEntry(sessionId);

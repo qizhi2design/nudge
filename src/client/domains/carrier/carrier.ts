@@ -54,6 +54,7 @@ function createCarrier(options) {
   var barHosted = false;
   var theme = options.theme || readTheme();
   var localeStrings = options.localeStrings || {};
+  var hotkeys = null;
   var listeners = [];
 
   function notify(name, payload) {
@@ -289,8 +290,12 @@ function createCarrier(options) {
     if (!runtimeReady) return Promise.resolve(false);
     var strings = stringsFor(localeStrings);
     var palette = themePaletteForRuntime(theme);
+    // Page-local hotkeys travel before the locale/theme call so a freshly
+    // injected runtime always has the user's keys for its first keydown.
+    var hotkeySource = hotkeys !== null && typeof hotkeys === 'object' ? 'r.setHotkeys(' + JSON.stringify(hotkeys) + ');' : '';
     return exec(
       '(function(){try{var r=window.__DSH_NUDGE__;if(!r)return false;' +
+        hotkeySource +
         'r.setLocale(' + JSON.stringify(strings) + ');' +
         'r.setTheme(' + JSON.stringify(palette) + ');' +
         'r.setBottomInset(' + bottomInset + ');' +
@@ -435,9 +440,10 @@ function createCarrier(options) {
     exec: exec,
     runtime: runtimeCommand,
     injectRuntime: injectRuntime,
-    applyPreferences: function (nextTheme, nextLocale) {
+    applyPreferences: function (nextTheme, nextLocale, nextHotkeys) {
       if (nextTheme !== undefined) theme = nextTheme;
       if (nextLocale !== undefined) localeStrings = nextLocale;
+      if (nextHotkeys !== undefined) hotkeys = nextHotkeys;
       return applyRuntimePreferences();
     },
     setMode: function (mode) {

@@ -227,8 +227,15 @@ assert(readOnlySnapshot.values.enableAnnotate === true, 'config snapshot reports
 assert(!Object.prototype.hasOwnProperty.call(readOnlySnapshot.values, 'sourceRoot'), 'settings snapshot hides the internal mapping fields')
 assert(
   Object.keys(readOnlySnapshot.defaults).sort().join(',') ===
-    ['contextMenuLink', 'contextMenuTab', 'enableAnnotate', 'enableDomTree', 'enableEdit', 'enableFloatingComposer', 'enableHotReload', 'enableWorkspaceVersions', 'language'].sort().join(','),
+    ['contextMenuLink', 'contextMenuTab', 'enableAnnotate', 'enableDomTree', 'enableEdit', 'enableFloatingComposer', 'enableHotReload', 'enableWorkspaceVersions', 'hotkeyAnnotate', 'hotkeyEdit', 'hotkeyNextAnnotation', 'hotkeyPrevAnnotation', 'language'].sort().join(','),
   'config snapshot reports the product defaults',
+)
+assert(
+  readOnlySnapshot.values.hotkeyAnnotate === 'KeyA' &&
+    readOnlySnapshot.values.hotkeyEdit === 'KeyE' &&
+    readOnlySnapshot.values.hotkeyPrevAnnotation === 'ArrowUp' &&
+    readOnlySnapshot.values.hotkeyNextAnnotation === 'ArrowDown',
+  'config snapshot reports the single-key page hotkey defaults',
 )
 
 const entry = {
@@ -259,11 +266,13 @@ assert(
 )
 assert(!writableSnapshot.overridden.includes('urlRoot'), 'internal mapping fields are not reported as product overrides')
 
-const saved = await api.configUpdate({ enableEdit: false, language: 'en' })
+const saved = await api.configUpdate({ enableEdit: false, language: 'en', hotkeyAnnotate: 'KeyB' })
 assert(saved.saved === true && saved.values.enableEdit === false, 'configUpdate reports the accepted feature switch')
 assert(saved.values.language === 'en', 'configUpdate reports the accepted language')
+assert(saved.values.hotkeyAnnotate === 'KeyB', 'configUpdate reports the accepted page hotkey')
 assert(writes.length === 1 && writes[0].enableEdit === false, 'configUpdate writes the feature switch')
 assert(writes[0].language === 'en', 'configUpdate writes the language')
+assert(writes[0].hotkeyAnnotate === 'KeyB', 'configUpdate writes the page hotkey')
 assert(!Object.prototype.hasOwnProperty.call(writes[0], 'sourceRoot'), 'configUpdate leaves internal fields out of the patch')
 const afterSave = await api.config()
 assert(afterSave.values.enableEdit === false, 'config snapshot reflects the written feature switch')
@@ -278,6 +287,10 @@ const clampedLanguage = await api.configUpdate({ language: 'xx' })
 assert(clampedLanguage.values.language === 'auto', 'invalid language falls back to auto')
 const invalidBoolean = await api.configUpdate({ enableHotReload: 'no' })
 assert(invalidBoolean.values.enableHotReload === true, 'invalid booleans fall back to the default')
+const invalidHotkey = await api.configUpdate({ hotkeyEdit: 'NotAKey' })
+assert(invalidHotkey.values.hotkeyEdit === 'KeyE', 'invalid page hotkeys fall back to the default')
+const customHotkey = await api.configUpdate({ hotkeyNextAnnotation: 'KeyJ' })
+assert(customHotkey.values.hotkeyNextAnnotation === 'KeyJ', 'configUpdate accepts a custom annotation key')
 const resetPatch = {
   language: 'auto',
   enableAnnotate: true,
@@ -287,6 +300,10 @@ const resetPatch = {
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,
+  hotkeyAnnotate: 'KeyA',
+  hotkeyEdit: 'KeyE',
+  hotkeyPrevAnnotation: 'ArrowUp',
+  hotkeyNextAnnotation: 'ArrowDown',
 }
 const defaults = await api.configUpdate(resetPatch)
 assert(defaults.saved === true, 'configUpdate accepts the product defaults patch')

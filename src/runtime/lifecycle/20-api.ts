@@ -104,6 +104,22 @@
 		if (designCard) positionDesignCard()
 		return !0
 	}
+	/**
+	 * Merge partial page-hotkey overrides from the plugin settings page. Only
+	 * non-empty strings are accepted as physical KeyboardEvent.code values; any
+	 * invalid or missing field keeps the value it currently has.
+	 */
+	function setHotkeys(map) {
+		if (!map || typeof map != 'object') return !1
+		var next = copyHotkeys(hotkeys),
+			fields = ['annotate', 'edit', 'prevAnnotation', 'nextAnnotation']
+		for (var index = 0; index < fields.length; index += 1) {
+			var value = map[fields[index]]
+			typeof value == 'string' && value.trim() !== '' && (next[fields[index]] = value.trim())
+		}
+		;(hotkeys = copyHotkeys(next))
+		return !0
+	}
 	var api = {
 		version: VERSION,
 		setMode: function (nextMode) {
@@ -145,6 +161,7 @@
 		locate,
 		setLocale,
 		setTheme,
+		setHotkeys,
 		setBottomInset,
 		setBarHosted,
 		getBarState,

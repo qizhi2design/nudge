@@ -108,6 +108,10 @@ const DEFAULT_CONFIG = Object.freeze({
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,
+  hotkeyAnnotate: 'KeyA',
+  hotkeyEdit: 'KeyE',
+  hotkeyPrevAnnotation: 'ArrowUp',
+  hotkeyNextAnnotation: 'ArrowDown',
   sourceRoot: '',
   urlRoot: '',
   maxScanFiles: 400,
@@ -115,6 +119,14 @@ const DEFAULT_CONFIG = Object.freeze({
 })
 
 const LANGUAGES = Object.freeze(['auto', 'zh', 'en'])
+
+/**
+ * Page-local hotkeys accept physical `KeyboardEvent.code` strings only. The
+ * list mirrors what the injected runtime understands; anything else falls back
+ * to the default so a hand-edited patch file cannot wedge the recorder.
+ */
+const HOTKEY_CODE_PATTERN =
+  /^(?:Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Period|Comma|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote)$/
 
 /** One native Schemastery object node is enough for the live Config inspector. */
 function nativeConfigNode(type, meta) {
@@ -162,6 +174,22 @@ Config.dict = {
     default: DEFAULT_CONFIG.contextMenuTab,
     description: 'Add "Open in Nudge" to the browser tab actions menu.',
   }),
+  hotkeyAnnotate: nativeConfigNode('string', {
+    default: DEFAULT_CONFIG.hotkeyAnnotate,
+    description: 'Physical key code that enters annotate mode inside the inspected page.',
+  }),
+  hotkeyEdit: nativeConfigNode('string', {
+    default: DEFAULT_CONFIG.hotkeyEdit,
+    description: 'Physical key code that enters edit mode inside the inspected page.',
+  }),
+  hotkeyPrevAnnotation: nativeConfigNode('string', {
+    default: DEFAULT_CONFIG.hotkeyPrevAnnotation,
+    description: 'Physical key code that focuses the previous annotation in annotate mode.',
+  }),
+  hotkeyNextAnnotation: nativeConfigNode('string', {
+    default: DEFAULT_CONFIG.hotkeyNextAnnotation,
+    description: 'Physical key code that focuses the next annotation in annotate mode.',
+  }),
   sourceRoot: nativeConfigNode('string', {
     default: DEFAULT_CONFIG.sourceRoot,
     description:
@@ -206,6 +234,8 @@ function normalizeConfig(value) {
     return Math.min(max, Math.max(min, Math.floor(parsed)))
   }
   const bool = (candidate, fallback) => (typeof candidate === 'boolean' ? candidate : fallback)
+  const hotkey = (candidate, fallback) =>
+    typeof candidate === 'string' && HOTKEY_CODE_PATTERN.test(candidate) ? candidate : fallback
   const language = LANGUAGES.includes(raw.language) ? raw.language : DEFAULT_CONFIG.language
   return {
     language,
@@ -217,6 +247,10 @@ function normalizeConfig(value) {
     enableHotReload: bool(raw.enableHotReload, DEFAULT_CONFIG.enableHotReload),
     contextMenuLink: bool(raw.contextMenuLink, DEFAULT_CONFIG.contextMenuLink),
     contextMenuTab: bool(raw.contextMenuTab, DEFAULT_CONFIG.contextMenuTab),
+    hotkeyAnnotate: hotkey(raw.hotkeyAnnotate, DEFAULT_CONFIG.hotkeyAnnotate),
+    hotkeyEdit: hotkey(raw.hotkeyEdit, DEFAULT_CONFIG.hotkeyEdit),
+    hotkeyPrevAnnotation: hotkey(raw.hotkeyPrevAnnotation, DEFAULT_CONFIG.hotkeyPrevAnnotation),
+    hotkeyNextAnnotation: hotkey(raw.hotkeyNextAnnotation, DEFAULT_CONFIG.hotkeyNextAnnotation),
     sourceRoot: text(raw.sourceRoot, DEFAULT_CONFIG.sourceRoot),
     urlRoot: text(raw.urlRoot, DEFAULT_CONFIG.urlRoot),
     maxScanFiles: number(raw.maxScanFiles, DEFAULT_CONFIG.maxScanFiles, 20, 5000),
@@ -235,6 +269,10 @@ const SETTINGS_FIELDS = Object.freeze([
   'enableHotReload',
   'contextMenuLink',
   'contextMenuTab',
+  'hotkeyAnnotate',
+  'hotkeyEdit',
+  'hotkeyPrevAnnotation',
+  'hotkeyNextAnnotation',
 ])
 
 /** Package facts for the Settings → 关于与更新 card. */

@@ -63,7 +63,7 @@ function openNudge(ctx, sessionId, tab) {
  */
 function BrowserGuideCard(props) {
   var theme = useDshTheme(props.ctx);
-  var t = props.t;
+  var t = usePluginTranslator(props.t);
   var [hover, setHover] = React.useState(false);
   var [menuOpen, setMenuOpen] = React.useState(false);
   var rootRef = React.useRef(null);
@@ -313,8 +313,7 @@ function BrowserGuideCard(props) {
  */
 function NudgeTabTitle(props) {
   var theme = useDshTheme(props.ctx);
-  usePluginConfig();
-  var t = typeof props.t === 'function' ? props.t : function (key) { return key; };
+  var t = usePluginTranslator(typeof props.t === 'function' ? props.t : function (key) { return key; });
   return React.createElement(
     React.Fragment,
     null,
@@ -340,7 +339,7 @@ function NudgeTabTitle(props) {
 function BrowserTabMenuAction(props) {
   var theme = useDshTheme(props.ctx);
   var pluginConfig = usePluginConfig();
-  var t = props.t;
+  var t = usePluginTranslator(props.t);
   var tab = props.tab;
   if (pluginConfig.values.contextMenuTab !== true) return null;
   if (!tab || tab.kind !== BROWSER_KIND) return null;

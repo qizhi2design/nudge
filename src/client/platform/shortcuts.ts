@@ -5,9 +5,9 @@
  * The DSH shortcut service owns every binding, its recorder and the shared
  * "Keyboard shortcuts" reference. Nudge contributes one editable command per
  * app-level product action and routes each command to the live Inspector tab
- * body through the command bus below, so the system reference and the
- * in-product shortcut sheet read the same effective bindings — including user
- * overrides recorded in the system settings.
+ * body through the command bus below, so the system reference and the toolbar
+ * tooltips read the same effective bindings — including user overrides recorded
+ * in the system settings.
  *
  * Annotate / edit activation is deliberately NOT a DSH command any more: the
  * page-local single keys are configured in Settings → Nudge → Shortcuts, applied

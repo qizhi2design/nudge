@@ -207,6 +207,19 @@
 		root && updateVisuals()
 		scheduleFrame()
 	}
+	/**
+	 * Match a page hotkey against a KeyboardEvent. The physical `code` wins so
+	 * the binding stays layout-independent; synthetic events without a code fall
+	 * back to `key` (accepting both 'a' and 'KeyA' spellings for letters).
+	 */
+	function hotkeyMatches(event, hotkey) {
+		if (!event || !hotkey) return !1
+		var code = typeof event.code == 'string' ? event.code : '',
+			key = typeof event.key == 'string' ? event.key : ''
+		if (code !== '') return code === hotkey
+		if (key === hotkey) return !0
+		return key.length === 1 && /^[a-z]$/i.test(key) && 'Key' + key.toUpperCase() === hotkey
+	}
 	function onKeyDown(event) {
 		if (destroyed || !event) return
 		var key = event.key || '',
@@ -247,8 +260,9 @@
 				;((drag = null), parts && parts.marquee && hidePart(parts.marquee), parts && parts.drop && hidePart(parts.drop), scheduleFrame())
 				return
 			}
-			// Nothing left to close: leave annotate/edit for the browse surface. The
-			// host follows through the mode-change event api.setMode queues.
+			// Nothing left to close: leave annotate/edit for the browse surface. Esc
+			// is the only way out of a mode; the host follows through the
+			// mode-change event api.setMode queues.
 			if (mode !== 'browse') {
 				try {
 					;(event.preventDefault(), event.stopPropagation())
@@ -257,6 +271,25 @@
 			}
 			return
 		}
+		// Single-key mode activation on the page: A enters annotate, E enters edit
+		// (or whatever the host bound through api.setHotkeys). Modifier chords,
+		// key repeats, text fields and our own overlay never activate a mode.
+		if (!passthrough && !drag && !popover && !designCard && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
+			if (hotkeyMatches(event, hotkeys.annotate)) {
+				try {
+					;(event.preventDefault(), event.stopPropagation())
+				} catch {}
+				mode !== 'annotate' && api.setMode('annotate')
+				return
+			}
+			if (hotkeyMatches(event, hotkeys.edit)) {
+				try {
+					;(event.preventDefault(), event.stopPropagation())
+				} catch {}
+				mode !== 'edit' && api.setMode('edit')
+				return
+			}
+		}
 		if ((key === 'Delete' || key === 'Backspace') && mode === 'edit' && selectionEl && !popover && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
 			try {
 				;(event.preventDefault(), event.stopPropagation())
@@ -264,25 +297,18 @@
 			structureRemove(selectionEl)
 			return
 		}
-		// Annotate-mode ArrowUp/ArrowDown cycles through existing annotations
-		// (wrap-around), reopening each editor without focus so repeats keep
-		// cycling. Anything outside the exact guard falls through to the page.
-		if ((key === 'ArrowUp' || key === 'ArrowDown' || code === 'ArrowUp' || code === 'ArrowDown') && mode === 'annotate' && !passthrough && !drag && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
-			if (focusAdjacentAnnotation(key === 'ArrowDown' || code === 'ArrowDown' ? 1 : -1)) {
+		// In annotate mode the bound previous/next keys (default ↑/↓) cycle through
+		// existing annotations with wrap-around, reopening each editor without focus
+		// so repeats keep cycling. This stays active while the editor is open; any
+		// other target falls through so the page keeps its own scrolling/keys.
+		if (mode === 'annotate' && !passthrough && !drag && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
+			var direction = hotkeyMatches(event, hotkeys.prevAnnotation) ? -1 : hotkeyMatches(event, hotkeys.nextAnnotation) ? 1 : 0
+			if (direction !== 0 && focusAdjacentAnnotation(direction)) {
 				try {
 					;(event.preventDefault(), event.stopPropagation())
 				} catch {}
 				return
 			}
-		}
-		// Shift+Tab toggles annotate <-> edit; from browse it enters annotate so the
-		// key never lands on an ambiguous "last used" mode after a reload.
-		if ((key === 'Tab' || code === 'Tab') && event.shiftKey && !passthrough && !popover && !designCard && !event.repeat && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableEvent(event) && !isOverlayEvent(event)) {
-			try {
-				;(event.preventDefault(), event.stopPropagation())
-			} catch {}
-			api.setMode(mode === 'edit' ? 'annotate' : mode === 'annotate' ? 'edit' : 'annotate')
-			return
 		}
 	}
 	function onKeyUp(event) {

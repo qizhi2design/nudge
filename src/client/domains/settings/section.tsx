@@ -33,6 +33,77 @@ var SETTINGS_CONTEXT_MENU_ROWS = [
   { key: 'contextMenuTab', label: 'settings.contextMenuTab', hint: 'settings.contextMenuTabHint' },
 ]
 
+/**
+ * Page-local hotkeys the recorder may edit. Values are physical
+ * `KeyboardEvent.code` strings; the injected runtime owns their behavior.
+ */
+var SETTINGS_HOTKEY_ROWS = [
+  { key: 'hotkeyAnnotate', label: 'shortcut.enterAnnotate' },
+  { key: 'hotkeyEdit', label: 'shortcut.enterEdit' },
+  { key: 'hotkeyPrevAnnotation', label: 'shortcut.prevAnnotation' },
+  { key: 'hotkeyNextAnnotation', label: 'shortcut.nextAnnotation' },
+]
+
+var SETTINGS_HOTKEY_DEFAULTS = {
+  hotkeyAnnotate: 'KeyA',
+  hotkeyEdit: 'KeyE',
+  hotkeyPrevAnnotation: 'ArrowUp',
+  hotkeyNextAnnotation: 'ArrowDown',
+}
+
+/** Keys the page runtime reserves, so the recorder may never bind them. */
+var SETTINGS_HOTKEY_RESERVED = ['Escape', 'Space', 'Tab', 'Enter', 'Backspace', 'Delete']
+
+/** Bare modifier keydowns cannot be a binding and are skipped while recording. */
+var SETTINGS_HOTKEY_MODIFIERS = [
+  'ShiftLeft',
+  'ShiftRight',
+  'ControlLeft',
+  'ControlRight',
+  'AltLeft',
+  'AltRight',
+  'MetaLeft',
+  'MetaRight',
+]
+
+/**
+ * Recordable physical codes. Mirrors the Host's normalizeConfig whitelist so the
+ * page never offers a code the Host would silently reject.
+ */
+var SETTINGS_HOTKEY_CODE_PATTERN =
+  /^(?:Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Period|Comma|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote)$/
+
+/** Human keycap label for one physical code. */
+var SETTINGS_HOTKEY_LABELS = {
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  Period: '.',
+  Comma: ',',
+  Slash: '/',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backslash: '\\',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+}
+
+function settingsHotkeyAllowed(code) {
+  return typeof code === 'string' && SETTINGS_HOTKEY_CODE_PATTERN.test(code);
+}
+
+function settingsHotkeyLabel(code) {
+  if (typeof code !== 'string' || code === '') return '—';
+  if (SETTINGS_HOTKEY_LABELS[code] !== undefined) return SETTINGS_HOTKEY_LABELS[code];
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return code;
+}
+
 function settingsFormStyle() {
   return {
     maxWidth: 760,
@@ -153,24 +224,83 @@ function settingsKnobStyle(checked) {
   }
 }
 
+/**
+ * One segmented control group: the three language choices read as a single
+ * control instead of three loose buttons, matching the settings shell's
+ * selected-pill language while keeping the row's right edge calm.
+ */
+function settingsSegmentedGroupStyle() {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    flex: 'none',
+    padding: 3,
+    boxSizing: 'border-box',
+    borderRadius: 'calc(var(--dsw-radius-md, 8px) + 2px)',
+    background: 'var(--dsw-alias-bg-module-platform, rgba(128,128,128,.14))',
+    border: '.5px solid var(--dsw-alias-border-l2)',
+  }
+}
+
 function settingsSegmentedStyle(active, disabled) {
   return {
     height: 28,
-    padding: '0 12px',
+    minWidth: 62,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 14px',
+    boxSizing: 'border-box',
+    border: 'none',
     borderRadius: 'var(--dsw-radius-md, 8px)',
-    border: active
-      ? '.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 50%, transparent)'
-      : '.5px solid var(--dsw-alias-border-l3)',
     background: active
-      ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 12%, transparent)'
+      ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 16%, transparent)'
       : 'transparent',
-    color: active ? 'var(--dsw-alias-state-business-primary, #0069fb)' : 'var(--dsw-alias-label-primary)',
+    color: active ? 'var(--dsw-alias-state-business-primary, #0069fb)' : 'var(--dsw-alias-label-secondary)',
     font: 'inherit',
     fontSize: 12,
-    fontWeight: active ? 600 : 400,
+    fontWeight: active ? 600 : 500,
+    boxShadow: active
+      ? 'inset 0 0 0 .5px color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 42%, transparent)'
+      : 'none',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.5 : 1,
+    transition: 'background-color 120ms ease, color 120ms ease, box-shadow 120ms ease',
   }
+}
+
+function settingsHotkeyKeycapStyle(recording, disabled) {
+  return {
+    height: 30,
+    minWidth: 56,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 12px',
+    border: recording
+      ? '.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 60%, transparent)'
+      : '.5px solid var(--dsw-alias-border-l3)',
+    borderRadius: 'var(--dsw-radius-md, 8px)',
+    background: recording
+      ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #0069fb) 12%, transparent)'
+      : 'transparent',
+    color: recording ? 'var(--dsw-alias-state-business-primary, #0069fb)' : 'var(--dsw-alias-label-primary)',
+    font: '12px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+    cursor: disabled ? 'default' : 'pointer',
+    opacity: disabled ? 0.5 : 1,
+  };
+}
+
+function settingsHotkeyFixedStyle() {
+  return Object.assign(settingsHotkeyKeycapStyle(false, true), {
+    cursor: 'default',
+    opacity: 1,
+    fontWeight: 500,
+    color: 'var(--dsw-alias-label-secondary)',
+  });
 }
 
 function settingsFormatTime(value) {
@@ -237,6 +367,14 @@ function NudgeSettingsSection(props) {
   var updatingState = React.useState(false);
   var updating = updatingState[0];
   var setUpdating = updatingState[1];
+  // The hotkey recorder: `hotkeyRecording` is the config key currently waiting
+  // for a keydown (null when idle), `hotkeyConflict` is the inline rejection.
+  var hotkeyRecordingState = React.useState(null);
+  var hotkeyRecording = hotkeyRecordingState[0];
+  var setHotkeyRecording = hotkeyRecordingState[1];
+  var hotkeyConflictState = React.useState('');
+  var hotkeyConflict = hotkeyConflictState[0];
+  var setHotkeyConflict = hotkeyConflictState[1];
   var aliveRef = React.useRef(true);
 
   // 设置页打开时 `about` 会带回 Host 缓存的检查快照；手动检查/一键更新后
@@ -249,6 +387,54 @@ function NudgeSettingsSection(props) {
       aliveRef.current = false;
     };
   }, []);
+
+  /**
+   * Recorder key capture. Mounted only while a row is recording, so the page
+   * never swallows keys at rest. Physical modifier keydowns are ignored (they
+   * cannot be a single-key binding), Escape cancels, and the host-level options
+   * / page keys stay reserved. A rejected key keeps the row recording so the
+   * user can simply press a different key.
+   */
+  React.useEffect(function () {
+    if (hotkeyRecording === null) return undefined;
+    function cancel() {
+      setHotkeyRecording(null);
+      setHotkeyConflict('');
+    }
+    function onKeyDown(event) {
+      if (event.isComposing === true) return;
+      var code = typeof event.code === 'string' ? event.code : '';
+      if (SETTINGS_HOTKEY_MODIFIERS.indexOf(code) !== -1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (code === 'Escape') {
+        cancel();
+        return;
+      }
+      if (SETTINGS_HOTKEY_RESERVED.indexOf(code) !== -1 || !settingsHotkeyAllowed(code)) {
+        setHotkeyConflict(t('settings.hotkeyConflict'));
+        return;
+      }
+      var values = config !== null && config.values !== null ? config.values : {};
+      for (var index = 0; index < SETTINGS_HOTKEY_ROWS.length; index += 1) {
+        var other = SETTINGS_HOTKEY_ROWS[index];
+        if (other.key !== hotkeyRecording && values[other.key] === code) {
+          setHotkeyConflict(t('settings.hotkeyConflict'));
+          return;
+        }
+      }
+      setHotkeyConflict('');
+      setHotkeyRecording(null);
+      updateHotkey(hotkeyRecording, code);
+    }
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('blur', cancel);
+    return function () {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('blur', cancel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotkeyRecording, config, t]);
 
   var load = React.useCallback(
     function () {
@@ -364,6 +550,63 @@ function NudgeSettingsSection(props) {
     });
     setPluginConfig(optimistic, null);
     persist({ language: value }, previousValues);
+  }
+
+  /** Persist one recorded hotkey through the same optimistic persist path. */
+  function updateHotkey(key, code) {
+    if (config === null || config.writable !== true || status === 'saving') return;
+    var previousValues = {};
+    previousValues[key] = config.values[key];
+    if (previousValues[key] === code) return;
+    var optimistic = Object.assign({}, config.values);
+    optimistic[key] = code;
+    setConfig(function (previous) {
+      if (previous === null) return previous;
+      return Object.assign({}, previous, { values: optimistic });
+    });
+    setPluginConfig(optimistic, null);
+    var patch = {};
+    patch[key] = code;
+    persist(patch, previousValues);
+  }
+
+  /** Start (or stop) recording the pressed key for one row. */
+  function toggleHotkeyRecording(key) {
+    if (config === null || config.writable !== true || status === 'saving') return;
+    setHotkeyConflict('');
+    setHotkeyRecording(hotkeyRecording === key ? null : key);
+  }
+
+  /** Cancel recording without touching the stored value. */
+  function cancelHotkeyRecording() {
+    setHotkeyRecording(null);
+    setHotkeyConflict('');
+  }
+
+  /** Patch the four page-local hotkeys back to their shipped defaults. */
+  function restoreHotkeyDefaults() {
+    if (config === null || config.writable !== true || status === 'saving') return;
+    var currentValues = config.values !== null ? config.values : {};
+    var patch = {};
+    var previousValues = {};
+    var changed = false;
+    Object.keys(SETTINGS_HOTKEY_DEFAULTS).forEach(function (key) {
+      previousValues[key] = currentValues[key];
+      patch[key] = SETTINGS_HOTKEY_DEFAULTS[key];
+      if (previousValues[key] !== patch[key]) changed = true;
+    });
+    if (!changed) return;
+    cancelHotkeyRecording();
+    var optimistic = Object.assign({}, currentValues);
+    Object.keys(patch).forEach(function (key) {
+      optimistic[key] = patch[key];
+    });
+    setConfig(function (previous) {
+      if (previous === null) return previous;
+      return Object.assign({}, previous, { values: optimistic });
+    });
+    setPluginConfig(optimistic, null);
+    persist(patch, previousValues);
   }
 
   function restoreDefaults() {
@@ -504,29 +747,126 @@ function NudgeSettingsSection(props) {
       { style: settingsRowStyle(false) },
       h(
         'div',
-        { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } },
+        { style: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 auto', maxWidth: 480, paddingRight: 16 } },
         h('span', { style: { fontWeight: 500 } }, t('settings.language')),
-        h('span', { style: settingsHintStyle() }, t('settings.languageHint')),
+        h('span', { style: Object.assign(settingsHintStyle(), { maxWidth: 460 }) }, t('settings.languageHint')),
       ),
       h(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6, flex: 'none' } },
+        { role: 'group', 'aria-label': t('settings.language'), style: settingsSegmentedGroupStyle() },
         options.map(function (option) {
+          var active = current === option.value;
           return h(
             'button',
             {
               key: option.value,
               type: 'button',
-              'aria-pressed': current === option.value,
+              'aria-pressed': active,
               disabled: disabled,
               onClick: function () {
                 updateLanguage(option.value);
               },
-              style: settingsSegmentedStyle(current === option.value, disabled),
+              onMouseEnter: function (event) {
+                if (!active && !disabled) {
+                  event.currentTarget.style.background = 'color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)';
+                  event.currentTarget.style.color = 'var(--dsw-alias-label-primary)';
+                }
+              },
+              onMouseLeave: function (event) {
+                if (!active) {
+                  event.currentTarget.style.background = 'transparent';
+                  event.currentTarget.style.color = 'var(--dsw-alias-label-secondary)';
+                }
+              },
+              style: settingsSegmentedStyle(active, disabled),
             },
             option.label,
           );
         }),
+      ),
+    );
+  }
+
+  function hotkeyRow(row, last) {
+    var values = config !== null && config.values !== null ? config.values : {};
+    var current = values[row.key] !== undefined ? values[row.key] : SETTINGS_HOTKEY_DEFAULTS[row.key];
+    var recording = hotkeyRecording === row.key;
+    var disabled = config === null || config.writable !== true || status === 'saving';
+    return h(
+      'div',
+      { key: row.key, style: settingsRowStyle(last) },
+      h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } },
+        h('span', { style: { fontWeight: 500 } }, t(row.label)),
+        recording && hotkeyConflict
+          ? h(
+              'span',
+              {
+                role: 'status',
+                style: Object.assign(settingsHintStyle(), { color: 'var(--dsw-alias-state-error-primary)' }),
+              },
+              hotkeyConflict,
+            )
+          : null,
+      ),
+      h(
+        'button',
+        {
+          type: 'button',
+          'aria-label': t(row.label),
+          'aria-pressed': recording,
+          disabled: disabled,
+          onClick: function () {
+            toggleHotkeyRecording(row.key);
+          },
+          onBlur: function () {
+            if (recording) cancelHotkeyRecording();
+          },
+          style: settingsHotkeyKeycapStyle(recording, disabled),
+        },
+        recording ? t('settings.hotkeyRecording') : settingsHotkeyLabel(current),
+      ),
+    );
+  }
+
+  function hotkeyFixedRow(labelKey, keycap, last) {
+    return h(
+      'div',
+      { style: settingsRowStyle(last) },
+      h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } },
+        h('span', { style: { fontWeight: 500 } }, t(labelKey)),
+        h('span', { style: settingsHintStyle() }, t('settings.hotkeyFixedHint')),
+      ),
+      h('span', { style: settingsHotkeyFixedStyle() }, keycap),
+    );
+  }
+
+  function shortcutsCard() {
+    var disabled = config === null || config.writable !== true || status === 'saving';
+    return h(
+      'div',
+      { style: settingsCardStyle() },
+      SETTINGS_HOTKEY_ROWS.map(function (row) {
+        return hotkeyRow(row, false);
+      }),
+      hotkeyFixedRow('shortcut.exitMode', 'Esc', false),
+      hotkeyFixedRow('shortcut.holdSpace', 'Space', true),
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '10px 0 12px' } },
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: disabled,
+            onClick: restoreHotkeyDefaults,
+            style: settingsButtonStyle(false, disabled),
+          },
+          t('settings.hotkeyReset'),
+        ),
       ),
     );
   }
@@ -705,6 +1045,10 @@ function NudgeSettingsSection(props) {
           return switchControl(row.key, row.label, row.hint, index === SETTINGS_FEATURE_ROWS.length - 1);
         }),
       ),
+      h('div', { style: settingsSectionTitleStyle() }, t('settings.sectionShortcuts')),
+      shortcutsCard(),
+      h('div', { style: Object.assign(settingsHintStyle(), { paddingTop: 8 }) }, t('settings.hotkeyHint')),
+      h('div', { style: Object.assign(settingsHintStyle(), { paddingTop: 2 }) }, t('settings.hotkeyScopeHint')),
       h('div', { style: settingsSectionTitleStyle() }, t('settings.sectionContextMenu')),
       h(
         'div',

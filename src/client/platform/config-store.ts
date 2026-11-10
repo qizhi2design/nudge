@@ -20,6 +20,10 @@ var PLUGIN_CONFIG_DEFAULTS = Object.freeze({
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,
+  hotkeyAnnotate: 'KeyA',
+  hotkeyEdit: 'KeyE',
+  hotkeyPrevAnnotation: 'ArrowUp',
+  hotkeyNextAnnotation: 'ArrowDown',
 })
 
 var pluginConfigState = { loaded: false, pending: false, values: null, error: null }
@@ -118,6 +122,26 @@ function usePluginConfig() {
 }
 
 // ------------------------------------------------------------ translation
+
+/**
+ * React hook: a plugin translator that follows 设置 → 轻推 → 插件界面语言.
+ *
+ * Slot components receive the DSH translator bound to this plugin's namespace,
+ * which always follows the *app* language. Nudge's own language preference must
+ * win for plugin-owned UI (`auto` keeps the DSH translator), so every rendered
+ * surface wraps the injected translator through here and re-renders when the
+ * preference changes.
+ */
+function usePluginTranslator(baseT) {
+  var snapshot = usePluginConfig();
+  var language = snapshot.values.language;
+  return React.useMemo(
+    function () {
+      return createPluginTranslator(baseT);
+    },
+    [baseT, language],
+  );
+}
 
 /** Replace `{name}` placeholders in one locale string. */
 function formatPluginText(text, vars) {

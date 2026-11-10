@@ -290,6 +290,10 @@ const PRODUCT_VALUES = {
   enableHotReload: true,
   contextMenuLink: true,
   contextMenuTab: true,
+  hotkeyAnnotate: 'KeyA',
+  hotkeyEdit: 'KeyE',
+  hotkeyPrevAnnotation: 'ArrowUp',
+  hotkeyNextAnnotation: 'ArrowDown',
 }
 const PRODUCT_DEFAULTS = { ...PRODUCT_VALUES }
 const SNAPSHOT = {
@@ -359,6 +363,16 @@ function lastCall(calls, endpoint) {
   assert(text.includes('settings.language'), 'page renders the language row')
   assert(text.includes('settings.featureAnnotate'), 'page renders the annotation switch')
   assert(text.includes('settings.contextMenuLink'), 'page renders the link context-menu switch')
+  assert(text.includes('settings.sectionShortcuts'), 'page renders the Keyboard shortcuts section')
+  assert(text.includes('settings.hotkeyReset'), 'page renders the hotkey reset action')
+  assert(
+    text.includes('shortcut.enterAnnotate') && text.includes('shortcut.enterEdit'),
+    'page renders the editable mode activation rows',
+  )
+  assert(
+    text.includes('shortcut.exitMode') && text.includes('shortcut.holdSpace'),
+    'page renders the fixed Esc / Space rows',
+  )
   assert(text.includes('settings.aboutVersion') && text.includes('0.2.0'), 'page renders the plugin version')
   assert(text.includes('abc1234') && text.includes('main'), 'page renders the git branch and commit')
   assert(text.includes('settings.updateUnchecked'), 'page renders the initial update status')
@@ -368,6 +382,16 @@ function lastCall(calls, endpoint) {
   assert(annotateSwitch !== undefined && annotateSwitch.props['aria-checked'] === true, 'feature switch reflects the Host value')
   const languageZh = buttonByText(view.tree, 'settings.languageZh')
   assert(languageZh !== undefined, 'language switch offers 中文')
+  const languageGroup = findNodes(view.tree, (node) => node.props && node.props.role === 'group')[0]
+  assert(languageGroup !== undefined, 'language options render as one segmented group')
+  assert(textOf(languageGroup) === 'settings.languageAutosettings.languageZhsettings.languageEn', 'segmented group carries the three language options')
+  const languageButtons = findNodes(languageGroup, (node) => node.type === 'button')
+  assert(languageButtons.length === 3, 'segmented group has exactly three segments')
+  const pressedLanguage = languageButtons.filter((node) => node.props['aria-pressed'] === true)
+  assert(
+    pressedLanguage.length === 1 && textOf(pressedLanguage[0]) === 'settings.languageAuto',
+    'the stored language is the only pressed segment',
+  )
 }
 
 // ------------------------------------------------------------- feature save

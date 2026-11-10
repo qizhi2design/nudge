@@ -512,6 +512,56 @@ async function clickAndSettle(props, predicate, until) {
   assert(watchCalls === 0, 'panel does not own the hot-reload poll loop')
 }
 
+
+// ------------------------------------------------ open a file in a new Nudge tab
+
+{
+  console.log('\n# file row open-in-Nudge action opens a fresh Nudge tab')
+  runtime.reset()
+  const remote = createRemote((endpoint) => {
+    if (endpoint === 'workspace') return fixture()
+    if (endpoint === 'previewOpen') {
+      return { ok: true, port: 43127, baseUrl: 'http://127.0.0.1:43127/', url: 'http://127.0.0.1:43127/demo/index.html', file: 'demo/index.html', root: '/tmp/ws' }
+    }
+    if (endpoint === 'watchPoll') return { revision: 0, root: '/tmp/ws', watching: true, changed: [] }
+    return { __error: 'unexpected endpoint: ' + endpoint }
+  })
+  const opened = []
+  const navigations = []
+  const ctx = Object.assign(hostOf(remote), {
+    sidebarRight: {
+      openTabIn(sessionId, kind, options) {
+        opened.push({ sessionId, kind, options })
+      },
+      isExpanded() {
+        return true
+      },
+      toggleExpanded() {},
+    },
+  })
+  const props = panelProps(ctx, { onNavigate: (url) => navigations.push(url) })
+  const view = await settle(props, (tree) => textOf(tree).includes('index.html'))
+  const actions = findNodes(view.tree, (node) => node.props['data-workspace-open-nudge'] !== undefined)
+  assert(actions.length >= 1, 'each HTML file row offers an open-in-Nudge action')
+  assert(actions[0].props['aria-label'] === 'workspace.openInNudge', 'the action carries a localized label')
+  await clickAndSettle(
+    props,
+    (node) => node.props['data-workspace-open-nudge'] === 'demo/index.html',
+    () => opened.length > 0,
+  )
+  deepEq('open-in-Nudge requests the preview URL', lastCall(remote, 'previewOpen').args, {
+    session: 'session-1',
+    file: 'demo/index.html',
+  })
+  eq('open-in-Nudge opens one tab', opened.length, 1)
+  eq('open-in-Nudge uses the Nudge tab kind', opened[0] && opened[0].kind, 'nudge')
+  eq('open-in-Nudge targets the same session', opened[0] && opened[0].sessionId, 'session-1')
+  deepEq('open-in-Nudge navigates the new tab to the preview URL', opened[0] && opened[0].options, {
+    params: { url: 'http://127.0.0.1:43127/demo/index.html' },
+  })
+  eq('open-in-Nudge does not navigate the current carrier', navigations.length, 0)
+}
+
 // ------------------------------------------------------------- branches
 
 {

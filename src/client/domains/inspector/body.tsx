@@ -417,7 +417,8 @@ function isEditableShortcutTarget(target) {
 }
 
 function NudgeBody(props) {
-  var t = props.t;
+  // Follow the plugin's own language preference, not only the DSH app locale.
+  var t = usePluginTranslator(props.t);
   var theme = useDshTheme(props.ctx);
   var tabInfo = typeof props.useTabInfo === 'function' ? props.useTabInfo() : null;
   var tabRecord = tabInfo && tabInfo.tab ? tabInfo.tab : null;
@@ -525,6 +526,22 @@ function NudgeBody(props) {
   var runtimeLocale = React.useMemo(function () {
     return buildRuntimeLocale(t);
   }, [t]);
+  // Page-local hotkeys: physical `KeyboardEvent.code` strings owned by the
+  // plugin settings page. The memo keeps the identity stable so the runtime-prefs
+  // effect below only re-runs when one of the four keys actually changes.
+  var hotkeys = React.useMemo(function () {
+    return {
+      annotate: pluginConfig.values.hotkeyAnnotate,
+      edit: pluginConfig.values.hotkeyEdit,
+      prevAnnotation: pluginConfig.values.hotkeyPrevAnnotation,
+      nextAnnotation: pluginConfig.values.hotkeyNextAnnotation,
+    };
+  }, [
+    pluginConfig.values.hotkeyAnnotate,
+    pluginConfig.values.hotkeyEdit,
+    pluginConfig.values.hotkeyPrevAnnotation,
+    pluginConfig.values.hotkeyNextAnnotation,
+  ]);
 
   // ----------------------------------------------------------- source sync queue
   if (queueRef.current === null) {
@@ -847,8 +864,8 @@ function NudgeBody(props) {
   React.useEffect(function () {
     var carrier = carrierRef.current;
     if (!carrier) return;
-    carrier.applyPreferences(theme, runtimeLocale);
-  }, [theme, runtimeLocale]);
+    carrier.applyPreferences(theme, runtimeLocale, hotkeys);
+  }, [theme, runtimeLocale, hotkeys]);
 
   React.useEffect(function () {
     var carrier = carrierRef.current;
@@ -862,16 +879,15 @@ function NudgeBody(props) {
   // Host-level Esc: the page runtime exits annotate/edit from inside the guest
   // document, but focus can sit on host chrome (toolbar, dock, panel). Mirror
   // the same exit here so Esc works from anywhere in the panel. Skip events
-  // another surface already handled, text fields, modifier chords, the shortcut
-  // sheet itself (the sheet owns its Esc), and hidden mounted tabs — keepMounted
-  // bodies stay alive, so a background tab must not react to Esc.
+  // another surface already handled, text fields, modifier chords, and hidden
+  // mounted tabs — keepMounted bodies stay alive, so a background tab must not
+  // react to Esc.
   React.useEffect(function () {
     if (tab.mode === 'browse' || !floatingVisible) return undefined;
     function onHostKeyDown(event) {
       if (event.defaultPrevented || event.isComposing === true) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (isEditableShortcutTarget(event.target)) return;
-      if (document.querySelector('[data-shortcut-sheet]') !== null) return;
       patchTab(tabId, { mode: 'browse' });
     }
     window.addEventListener('keydown', onHostKeyDown);
@@ -1026,8 +1042,9 @@ function NudgeBody(props) {
       } else if (event.type === 'annotation-send') {
         insertToComposer();
       } else if (event.type === 'mode-change' && (event.mode === 'browse' || event.mode === 'annotate' || event.mode === 'edit')) {
-        // The page runtime owns its own mode shortcuts (Esc / Shift+Tab); mirror
-        // the authoritative mode instead of guessing from annotation events.
+        // The page runtime owns its own mode shortcuts (single-key A / E to
+        // enter, Esc to exit); mirror the authoritative mode instead of guessing
+        // from annotation events.
         if (tabRef.current.mode !== event.mode) patchTab(tabId, { mode: event.mode });
       } else if (event.type === 'annotation-exit') {
         patchTab(tabId, { mode: 'browse' });
@@ -1388,32 +1405,10 @@ function NudgeBody(props) {
   }, [tabId, sessionId]);
 
   var shortcutBindings = {};
-  var shortcutRows = [];
   NUDGE_SHORTCUT_COMMANDS.forEach(function (command) {
-    var binding = nudgeShortcutBinding(command.id);
-    shortcutBindings[command.id] = binding;
-    shortcutRows.push({
-      id: command.id,
-      label: t(command.label),
-      binding: binding,
-      disabled: command.feature ? features[command.feature] === false : false,
-    });
+    shortcutBindings[command.id] = nudgeShortcutBinding(command.id);
   });
   shortcutBindings['page.refresh'] = nudgeShortcutBinding('page.refresh');
-  shortcutRows.push({
-    id: NUDGE_SHORTCUT_SPACE.id,
-    label: t(NUDGE_SHORTCUT_SPACE.label),
-    binding: { code: 'Space', modifiers: [] },
-    pageLocal: true,
-  });
-  NUDGE_SHORTCUT_PAGE_KEYS.forEach(function (pageKey) {
-    shortcutRows.push({
-      id: pageKey.id,
-      label: t(pageKey.label),
-      binding: pageKey.bindings[0],
-      pageLocal: true,
-    });
-  });
 
   // ----------------------------------------------------------- render
 
@@ -1460,8 +1455,8 @@ function NudgeBody(props) {
       shortcuts: {
         platform: shortcutSnapshot.platform,
         bindings: shortcutBindings,
-        rows: shortcutRows,
       },
+      hotkeys: hotkeys,
       features: {
         annotate: features.enableAnnotate !== false,
         edit: features.enableEdit !== false,
