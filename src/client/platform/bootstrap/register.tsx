@@ -51,9 +51,9 @@ function revealNudgeTab(sidebar, tabId) {
 }
 
 /**
- * Focus an existing Inspector tab, or open one when the Session has none. A
- * mode command travels as the tab's initial navigation param; panel commands
- * are queued until the body registers its command surface.
+ * Focus an existing Inspector tab, or open one when the Session has none. Panel
+ * commands (DOM tree / workspace versions) are queued until the body registers
+ * its command surface.
  */
 function openNudgeForCommand(ctx, definition, target, tabRecord) {
   var sidebar = ctx.sidebarRight;
@@ -79,7 +79,6 @@ function openNudgeForCommand(ctx, definition, target, tabRecord) {
     }
   }
   var params = {};
-  if (definition.action === 'annotate' || definition.action === 'edit') params.mode = definition.action;
   if (tabRecord && tabRecord.kind === BROWSER_KIND) {
     var url = browserTabUrl(ctx, sessionId, tabRecord);
     if (url !== null) params.url = url;
@@ -93,9 +92,7 @@ function openNudgeForCommand(ctx, definition, target, tabRecord) {
     console.error('[dsh-nudge] open inspector failed', error);
     return false;
   }
-  if (definition.action !== 'annotate' && definition.action !== 'edit') {
-    queueNudgeCommand(sessionId, definition.action);
-  }
+  queueNudgeCommand(sessionId, definition.action);
   return true;
 }
 
@@ -130,7 +127,7 @@ function resolveNudgeShortcut(ctx, t, definition, input) {
   };
 }
 
-/** Register every Nudge command plus the read-only Space reference row. */
+/** Register every app-level Nudge command plus the read-only fixed page-key rows. */
 function installNudgeShortcuts(ctx, shortcuts, t) {
   var disposers = [installNudgeShortcutService(shortcuts)];
   NUDGE_SHORTCUT_COMMANDS.forEach(function (definition) {

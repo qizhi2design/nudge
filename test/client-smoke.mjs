@@ -126,6 +126,14 @@ const pluginDefaults = workspaceTestHook.pluginConfigDefaults()
 assert(pluginDefaults.language === 'auto', 'plugin language defaults to auto')
 assert(pluginDefaults.enableAnnotate === true && pluginDefaults.enableHotReload === true, 'feature switches default to enabled')
 assert(pluginDefaults.enableFloatingComposer === true, 'the fullscreen floating composer defaults to enabled')
+assert(
+  pluginDefaults.hotkeyAnnotate === 'KeyA' && pluginDefaults.hotkeyEdit === 'KeyE',
+  'single-key mode activation defaults to A / E',
+)
+assert(
+  pluginDefaults.hotkeyPrevAnnotation === 'ArrowUp' && pluginDefaults.hotkeyNextAnnotation === 'ArrowDown',
+  'annotation navigation defaults to ↑ / ↓',
+)
 assert(typeof workspaceTestHook.floatingComposerEligible === 'function', 'floating-composer eligibility is bundled')
 assert(typeof workspaceTestHook.installFloatingComposer === 'function', 'floating-composer installer is bundled')
 assert(typeof workspaceTestHook.setFloatingComposerRequest === 'function', 'floating-composer request seam is bundled')
@@ -235,22 +243,30 @@ assert(
   'mode shortcut hints localized in both dictionaries',
 )
 assert(
-  zhDict['shortcut.annotate'] === '轻推：进入 / 退出标注模式' &&
-    zhDict['shortcut.edit'] === '轻推：进入 / 退出编辑模式' &&
-    enDict['shortcut.annotate'] === 'Nudge: enter / exit annotate mode' &&
-    enDict['shortcut.edit'] === 'Nudge: enter / exit edit mode',
-  'mode commands state both activation and cancellation',
+  zhDict['shortcut.enterAnnotate'] === '进入标注模式' &&
+    zhDict['shortcut.enterEdit'] === '进入编辑模式' &&
+    enDict['shortcut.enterAnnotate'] === 'Enter annotate mode' &&
+    enDict['shortcut.enterEdit'] === 'Enter edit mode',
+  'mode tooltip states the activation key action',
 )
 assert(
-  zhDict['shortcut.hintToggleOff'] === '再按一次退出' &&
+  zhDict['shortcut.hintToggleOff'] === undefined &&
     zhDict['shortcut.hintSwitchAnnotation'] === '切换批注' &&
     zhDict['shortcut.prevAnnotation'] === '上一个批注' &&
     zhDict['shortcut.nextAnnotation'] === '下一个批注' &&
-    enDict['shortcut.hintToggleOff'] === 'Press again to exit' &&
     enDict['shortcut.hintSwitchAnnotation'] === 'Switch annotation' &&
     enDict['shortcut.prevAnnotation'] === 'Previous annotation' &&
     enDict['shortcut.nextAnnotation'] === 'Next annotation',
-  'mode tooltip and annotation-navigation hints localized in both dictionaries',
+  'annotation navigation hints localized in both dictionaries',
+)
+assert(
+  zhDict['settings.sectionShortcuts'] === '快捷键' &&
+    enDict['settings.sectionShortcuts'] === 'Keyboard shortcuts' &&
+    typeof zhDict['settings.hotkeyHint'] === 'string' &&
+    typeof enDict['settings.hotkeyHint'] === 'string' &&
+    typeof zhDict['settings.hotkeyRecording'] === 'string' &&
+    typeof enDict['settings.hotkeyConflict'] === 'string',
+  'settings hotkey section localized in both dictionaries',
 )
 assert(registrations.tabs.length === 1, 'exactly one tab type registered')
 assert(registrations.tabs[0].id === 'dsh.nudge', 'tab type id matches the plugin id')
@@ -283,8 +299,8 @@ assert(registrations.contextMenus.length === 1 && registrations.contextMenus[0].
 
 assert(
   registrations.shortcuts.map((command) => command.id).join(',') ===
-    'nudge.open,nudge.annotate.toggle,nudge.edit.toggle,nudge.dom.toggle,nudge.workspace.toggle',
-  'nudge registers one editable command per product action',
+    'nudge.open,nudge.dom.toggle,nudge.workspace.toggle',
+  'nudge keeps one editable command per app-level action (mode keys live in plugin settings)',
 )
 assert(
   registrations.shortcuts.every((command) => typeof command.label === 'function' && command.label().indexOf('shortcut.') === 0),
@@ -295,30 +311,18 @@ assert(
   'shortcut defaults cover desktop and web profiles',
 )
 assert(
-  registrations.shortcuts.find((command) => command.id === 'nudge.annotate.toggle').defaults['desktop:macos'].code === 'Period',
-  'annotation mode follows the reference Cmd/Ctrl+Shift+. binding',
-)
-assert(
-  registrations.fixedShortcuts.length === 5 &&
+  registrations.fixedShortcuts.length === 2 &&
     registrations.fixedShortcuts[0].id === 'nudge.fixed.space' &&
     registrations.fixedShortcuts[0].bindings[0].code === 'Space',
   'page-local Space interaction registers as a read-only fixed row',
 )
 assert(
-  registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.escape' && fixed.bindings[0].code === 'Escape') &&
-    registrations.fixedShortcuts.some(
-      (fixed) => fixed.id === 'nudge.fixed.shiftTab' && fixed.bindings[0].code === 'Tab' && fixed.bindings[0].modifiers.indexOf('shift') !== -1,
-    ),
-  'page-local Esc / Shift+Tab mode keys register as read-only fixed rows',
+  registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.escape' && fixed.bindings[0].code === 'Escape'),
+  'page-local Esc mode exit registers as a read-only fixed row',
 )
 assert(
-  registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.annotationPrev' && fixed.bindings[0].code === 'ArrowUp') &&
-    registrations.fixedShortcuts.some((fixed) => fixed.id === 'nudge.fixed.annotationNext' && fixed.bindings[0].code === 'ArrowDown'),
-  'page-local ↑/↓ annotation navigation registers as read-only fixed rows',
-)
-assert(
-  Array.isArray(workspaceTestHook.nudgeShortcutPageKeys) && workspaceTestHook.nudgeShortcutPageKeys.length === 4,
-  'the mode page-key rows (Esc / Shift+Tab / ↑ / ↓) are exposed to the shortcut sheet',
+  Array.isArray(workspaceTestHook.nudgeShortcutPageKeys) && workspaceTestHook.nudgeShortcutPageKeys.length === 1,
+  'only the fixed Esc row remains a DSH page key (mode / arrow keys moved to plugin settings)',
 )
 const keycapModel = workspaceTestHook.keycapModel
 const macKeys = keycapModel({ code: 'Period', modifiers: ['meta', 'shift'] }, 'macos')
@@ -341,8 +345,8 @@ assert(spaceKeys.length === 1 && spaceKeys[0].icon === 'space' && spaceKeys[0].l
 
 // Resolve branches: feature gate, missing session, live tab dispatch and open.
 const byId = (id) => registrations.shortcuts.find((command) => command.id === id)
-workspaceTestHook.setPluginConfig({ enableAnnotate: false }, null)
-const gated = byId('nudge.annotate.toggle').resolve({})
+workspaceTestHook.setPluginConfig({ enableDomTree: false }, null)
+const gated = byId('nudge.dom.toggle').resolve({})
 assert(gated.status === 'blocked' && gated.reason.indexOf('shortcut.featureOff') === 0, 'disabled feature blocks its shortcut')
 workspaceTestHook.setPluginConfig({}, null)
 registrations.noTarget = true
@@ -352,8 +356,8 @@ registrations.noTarget = false
 registrations.sidebarTabs = [{ id: 't', kind: 'nudge' }]
 const dispatched = []
 const disposeCommands = workspaceTestHook.registerNudgeTabCommands('t', 'session-1', { run: (action) => dispatched.push(action) })
-byId('nudge.annotate.toggle').resolve({}).run()
-assert(dispatched.join(',') === 'annotate', 'command routes to the live inspector tab body')
+byId('nudge.workspace.toggle').resolve({}).run()
+assert(dispatched.join(',') === 'workspace', 'command routes to the live inspector tab body')
 disposeCommands()
 registrations.sidebarTabs = []
 const disposeOpened = []

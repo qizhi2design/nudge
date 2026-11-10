@@ -295,7 +295,14 @@ assert(defaults.saved === true, 'configUpdate accepts the product defaults patch
 const about = await api.about(false)
 assert(about.name === '@huangqz/dsh.nudge', 'about reports the package name')
 assert(typeof about.version === 'string' && about.version.length > 0, 'about reports the package version', about.version)
-assert(typeof about.pluginRoot === 'string' && about.pluginRoot.endsWith('plugin'), 'about reports the plugin root', about.pluginRoot)
+// The package root is the checkout root when this repository is cloned directly
+// (CI) and the `plugin/` directory in the author's multi-repo workspace.
+assert(
+  typeof about.pluginRoot === 'string' &&
+    (resolve(about.pluginRoot) === ROOT || about.pluginRoot.endsWith('plugin')),
+  'about reports the plugin root',
+  about.pluginRoot,
+)
 assert(Array.isArray(about.builds) && about.builds.some((build) => build.name === 'client.js'), 'about reports the built client artifact')
 assert(about.git !== null && typeof about.git === 'object', 'about reports git facts')
 if (about.git.available === true) {

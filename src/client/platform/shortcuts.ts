@@ -4,11 +4,14 @@
  *
  * The DSH shortcut service owns every binding, its recorder and the shared
  * "Keyboard shortcuts" reference. Nudge contributes one editable command per
- * product action (plus the page-local Space sequence as a read-only row) and
- * routes each command to the live Inspector tab body through the command bus
- * below, so the system reference, the toolbar tooltips and the in-product
- * shortcut sheet all read the same effective bindings — including user
+ * app-level product action and routes each command to the live Inspector tab
+ * body through the command bus below, so the system reference and the
+ * in-product shortcut sheet read the same effective bindings — including user
  * overrides recorded in the system settings.
+ *
+ * Annotate / edit activation is deliberately NOT a DSH command any more: the
+ * page-local single keys are configured in Settings → Nudge → Shortcuts, applied
+ * by the injected runtime, and shown only in the toolbar tooltips.
  */
 
 /** One physical combination; mirrors the DSH shortcut binding shape. */
@@ -24,9 +27,11 @@ function nudgeShiftDefaults(code) {
 }
 
 /**
- * Editable Nudge commands. `action` is what the Inspector tab body receives
- * through `runNudgeTabAction`; `feature` names the product switch that gates
- * it in `pluginConfigValues()`.
+ * Editable app-level Nudge commands. `action` is what the Inspector tab body
+ * receives through `runNudgeTabAction`; `feature` names the product switch that
+ * gates it in `pluginConfigValues()`. Mode activation / annotation navigation are
+ * page-local single keys configured in the plugin settings, so they have no row
+ * here.
  */
 var NUDGE_SHORTCUT_COMMANDS = [
   {
@@ -37,24 +42,6 @@ var NUDGE_SHORTCUT_COMMANDS = [
     action: 'open',
     feature: null,
     regions: ['page', 'editable', 'terminal'],
-  },
-  {
-    id: 'nudge.annotate.toggle',
-    label: 'shortcut.annotate',
-    aliases: ['nudge', 'annotate', 'comment', 'annotation mode'],
-    defaults: nudgeShiftDefaults('Period'),
-    action: 'annotate',
-    feature: 'enableAnnotate',
-    regions: ['page', 'editable'],
-  },
-  {
-    id: 'nudge.edit.toggle',
-    label: 'shortcut.edit',
-    aliases: ['nudge', 'edit', 'style', 'edit mode'],
-    defaults: nudgeShiftDefaults('KeyE'),
-    action: 'edit',
-    feature: 'enableEdit',
-    regions: ['page', 'editable'],
   },
   {
     id: 'nudge.dom.toggle',
@@ -90,11 +77,11 @@ var NUDGE_SHORTCUT_SPACE = {
 }
 
 /**
- * Read-only page-local rows for the mode keys the injected runtime owns: Esc
- * exits the mode, Shift+Tab switches between annotate and edit, and
- * ArrowUp / ArrowDown switch annotations while annotate mode is active. They
- * are listed in the shortcut reference (and the in-product sheet) but cannot be
- * rebound here: the page document receives the key first, not the host UI.
+ * Read-only page-local rows for the mode keys the injected runtime owns and
+ * hard-codes: Esc leaves annotate / edit. The Space row above covers the other
+ * fixed page interaction. Mode activation (A / E) and annotation navigation
+ * (↑ / ↓) are configurable in Settings → Nudge → Shortcuts, so they are not
+ * listed here; the page document receives those keys first, not the host UI.
  */
 var NUDGE_SHORTCUT_PAGE_KEYS = [
   {
@@ -103,27 +90,6 @@ var NUDGE_SHORTCUT_PAGE_KEYS = [
     keys: ['Escape'],
     group: 'application',
     bindings: [{ code: 'Escape', modifiers: [] }],
-  },
-  {
-    id: 'nudge.fixed.shiftTab',
-    label: 'shortcut.switchMode',
-    keys: ['Shift', 'Tab'],
-    group: 'application',
-    bindings: [{ code: 'Tab', modifiers: ['shift'] }],
-  },
-  {
-    id: 'nudge.fixed.annotationPrev',
-    label: 'shortcut.prevAnnotation',
-    keys: ['↑'],
-    group: 'application',
-    bindings: [{ code: 'ArrowUp', modifiers: [] }],
-  },
-  {
-    id: 'nudge.fixed.annotationNext',
-    label: 'shortcut.nextAnnotation',
-    keys: ['↓'],
-    group: 'application',
-    bindings: [{ code: 'ArrowDown', modifiers: [] }],
   },
 ]
 

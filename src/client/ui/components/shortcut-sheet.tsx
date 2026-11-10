@@ -112,24 +112,31 @@ export function ShortcutSheet({
   )
 }
 
+/** Page-local hotkeys (physical `KeyboardEvent.code`s) from plugin settings. */
+export interface ModeHotkeyMap {
+  annotate: string
+  edit: string
+  prevAnnotation: string
+  nextAnnotation: string
+}
+
 /**
- * Rich hint rendered inside the Radix tooltip of the annotate / edit toggle.
- * The reference interaction teaches the same facts in a hover tooltip: the
- * action the mode performs, how to leave it again (the effective toggle binding
- * and Esc), the annotate-only ↑/↓ annotation navigation, and hold Space to hand
- * the page back.
+ * Rich hint rendered inside the tooltip of the annotate / edit toggle. The
+ * reference interaction teaches the same facts in a hover tooltip: the action
+ * the mode performs, the single page-local key that activates it (configured in
+ * Settings → Nudge), the annotate-only ↑/↓ annotation navigation, Esc to leave,
+ * and hold Space to hand the page back.
  */
 export function ModeHintContent({
   t,
   mode,
   platform,
-  binding,
+  hotkeys,
 }: {
   t: (key: string, vars?: Record<string, string>) => string
   mode: 'annotate' | 'edit'
   platform: ShortcutPlatform
-  /** Effective toggle binding; null / omitted renders no toggle-off row. */
-  binding?: ShortcutBinding | null
+  hotkeys: ModeHotkeyMap
 }) {
   const rowStyle: React.CSSProperties = {
     display: 'flex',
@@ -138,6 +145,7 @@ export function ModeHintContent({
     gap: 4,
     marginTop: 1,
   }
+  const modeKey: ShortcutBinding = { code: mode === 'edit' ? hotkeys.edit : hotkeys.annotate, modifiers: [] }
   return (
     <span
       data-mode-hint-content=""
@@ -146,17 +154,15 @@ export function ModeHintContent({
       <span style={{ display: 'block' }}>{mode === 'edit' ? t('shortcut.hintEdit') : t('shortcut.hintAnnotate')}</span>
       {mode === 'annotate' ? (
         <span style={rowStyle}>
-          <ShortcutKeys binding={{ code: 'ArrowUp', modifiers: [] }} platform={platform} size={18} />
-          <ShortcutKeys binding={{ code: 'ArrowDown', modifiers: [] }} platform={platform} size={18} />
+          <ShortcutKeys binding={{ code: hotkeys.prevAnnotation, modifiers: [] }} platform={platform} size={18} />
+          <ShortcutKeys binding={{ code: hotkeys.nextAnnotation, modifiers: [] }} platform={platform} size={18} />
           {t('shortcut.hintSwitchAnnotation')}
         </span>
       ) : null}
-      {binding ? (
-        <span style={rowStyle}>
-          <ShortcutKeys binding={binding} platform={platform} size={18} />
-          {t('shortcut.hintToggleOff')}
-        </span>
-      ) : null}
+      <span style={rowStyle}>
+        <ShortcutKeys binding={modeKey} platform={platform} size={18} />
+        {mode === 'edit' ? t('shortcut.enterEdit') : t('shortcut.enterAnnotate')}
+      </span>
       <span style={rowStyle}>
         <ShortcutKeys binding={{ code: 'Escape', modifiers: [] }} platform={platform} size={18} />
         {t('shortcut.exitMode')}

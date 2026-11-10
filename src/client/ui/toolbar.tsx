@@ -17,7 +17,12 @@ import {
 import { Button } from './components/button'
 import { Tooltip, TooltipProvider } from './components/tooltip'
 import { type ShortcutBinding, type ShortcutPlatform } from './components/kbd'
-import { ModeHintContent, ShortcutSheet, type ShortcutSheetRow } from './components/shortcut-sheet'
+import {
+  ModeHintContent,
+  ShortcutSheet,
+  type ModeHotkeyMap,
+  type ShortcutSheetRow,
+} from './components/shortcut-sheet'
 import { toolbarLayout, type ToolbarLayout } from './layout'
 
 export type InspectorMode = 'browse' | 'annotate' | 'edit'
@@ -55,6 +60,8 @@ export interface InspectorToolbarProps {
   theme: InspectorTheme
   tab: InspectorTab
   carrierKind?: string
+  /** Page-local single-key hotkeys (physical codes) from plugin settings. */
+  hotkeys: ModeHotkeyMap
   canUndo: boolean
   canRedo: boolean
   onBack: () => void
@@ -486,6 +493,7 @@ export function InspectorToolbar({
   theme,
   tab,
   carrierKind,
+  hotkeys,
   canUndo,
   canRedo,
   onBack,
