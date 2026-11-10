@@ -1,6 +1,6 @@
 {
   "name": "@huangqz/dsh.nudge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Nudge: point at anything on a web page, leave a note for your AI assistant, or fine-tune its styles and text until it looks right.",
   "keywords": [
     "dsh-plugin",
